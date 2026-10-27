@@ -210,6 +210,8 @@ function updatePreviewButton() {
 }
 
 let appVersion = '1.3.1';
+// Dépôt GitHub dont les releases servent à la vérification des mises à jour.
+const RELEASES_REPO = 'NeyorDEV/rl-tracker-suite';
 let latestReleaseInfo = null;
 
 function parseSemver(v) {
@@ -240,12 +242,13 @@ async function checkAppUpdates(silent = false) {
   }
 
   try {
-    const res = await fetch('https://api.github.com/repos/NeyorDEV/rl-tracker-suite/releases/latest', {
+    const res = await fetch(`https://api.github.com/repos/${RELEASES_REPO}/releases/latest`, {
       headers: { 'Accept': 'application/vnd.github.v3+json' },
     });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    latestReleaseInfo = data;
+    // 404 = aucune release publiée pour l'instant : on est forcément à jour.
+    const data = res.status === 404 ? { tag_name: '' } : res.ok ? await res.json() : null;
+    if (!data) throw new Error('HTTP ' + res.status);
+    latestReleaseInfo = res.status === 404 ? null : data;
 
     const remoteTag = data.tag_name || data.name || '';
     if (isNewerVersion(remoteTag, appVersion)) {
@@ -1267,7 +1270,7 @@ function bind() {
   }
 
   $('updateDownloadBtn')?.addEventListener('click', () => {
-    const url = latestReleaseInfo?.html_url || 'https://github.com/NeyorDEV/rl-tracker-suite/releases/latest';
+    const url = latestReleaseInfo?.html_url || `https://github.com/${RELEASES_REPO}/releases/latest`;
     app.openBrowserUrl(url);
   });
   $('updateDismissBtn')?.addEventListener('click', () => {
