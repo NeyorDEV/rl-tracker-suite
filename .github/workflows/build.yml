@@ -1,0 +1,41 @@
+name: Compiler pour Windows
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+
+      - name: Installer l'outil Tauri
+        run: npm install
+
+      - name: Tester
+        run: cargo test --workspace
+
+      - name: Compiler
+        run: npx tauri build
+
+      - name: Préparer les fichiers
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "target/release/rl-tracker-suite.exe" "dist/RL Tracker Suite (portable).exe"
+          Copy-Item "target/release/bundle/nsis/*.exe" "dist/"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RL-Tracker-Suite-Windows
+          path: dist/

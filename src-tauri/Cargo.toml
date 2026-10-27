@@ -1,0 +1,22 @@
+[package]
+name = "rl-tracker-suite"
+version.workspace = true
+description = "Stats de session et radar de lobby Rocket League via la Stats API officielle (compatible Easy Anti-Cheat)"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-dialog = "2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+tracker-core = { workspace = true }
+tracker-engine = { workspace = true }
+tracker-scraper = { workspace = true }

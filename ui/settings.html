@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>RL Tracker Suite</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Saira+Semi+Condensed:wght@400;500;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="settings.css">
+</head>
+<body>
+<nav class="tabs" role="tablist" aria-label="Sections de l'application">
+  <button type="button" class="tab" role="tab" data-tab="session" aria-selected="true">Session Stats</button>
+  <button type="button" class="tab" role="tab" data-tab="lt" aria-selected="false">LobbyTracker</button>
+</nav>
+<div class="app" id="tab-session">
+
+  <!-- Colonne session -->
+  <aside class="session">
+    <div class="brand">
+      <img src="icon.png" alt="" width="28" height="28">
+      <div>
+        <span>RL Tracker Suite</span>
+        <span class="app-version-badge" id="appVersion">v1.3.1</span>
+      </div>
+    </div>
+
+    <p class="status" id="status"><i></i><span>En attente de Rocket League</span></p>
+
+    <div class="banner" id="apiBanner" hidden>
+      <p>La Stats API de Rocket League est désactivée : aucune partie ne sera comptée.</p>
+      <button type="button" class="link" id="goToApi">L'activer</button>
+    </div>
+
+    <!-- MMR & Rang en session -->
+    <div class="rank-box" id="rankBox">
+      <div class="rank-box-top">
+        <div class="rank-left">
+          <div id="sideRankImg"></div>
+          <div class="rank-text">
+            <span class="rank-title" id="sideRankName">Platinum III</span>
+            <span class="rank-sub" id="sideRankDiv">Division 3</span>
+          </div>
+        </div>
+        <div class="mmr-badge">
+          <span id="sideMmr">855.0</span>
+          <small id="sideMmrChange">+0.0</small>
+        </div>
+      </div>
+      <!-- Progression vers la division suivante -->
+      <div style="width: 100%; margin-top: 4px;">
+        <div style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; color: var(--muted); margin-bottom: 4px;">
+          <span id="sideDivProgPct">0%</span>
+          <span id="sideDivProgNeeded" style="color: #2db0ff;">+0 MMR</span>
+        </div>
+        <div style="width: 100%; height: 5px; background: rgba(255,255,255,0.12); border-radius: 3px; overflow: hidden;">
+          <div id="sideDivProgFill" style="height: 100%; width: 0%; background: linear-gradient(90deg, #2db0ff, #b388ff); border-radius: 3px; transition: width 0.6s ease;"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="streak" id="streakBox">
+      <span class="streak-value" id="streak">0</span>
+      <span class="streak-caption">streak en cours</span>
+    </div>
+
+    <div class="record">
+      <div class="wins"><b id="wins">0</b><span>victoires</span></div>
+      <div class="losses"><b id="losses">0</b><span>défaites</span></div>
+      <div><b id="winrate">–</b><span>winrate</span></div>
+    </div>
+
+    <div class="recent" id="recent" aria-label="Dernières parties"></div>
+
+    <dl class="totals" id="totals"></dl>
+
+    <div class="per-playlist" id="perPlaylist"></div>
+
+    <button type="button" class="reset" id="reset">Réinitialiser la session</button>
+    <p class="since" id="since"></p>
+  </aside>
+
+  <!-- Paramètres -->
+  <main class="settings">
+
+    <!-- Bannière de Mise à Jour -->
+    <div id="updateBanner" class="update-banner" hidden>
+      <div class="update-icon-pulse">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 10 12 15 17 10"></polyline>
+          <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+      </div>
+      <div class="update-banner-body">
+        <div class="update-banner-header">
+          <strong>Mise à jour disponible : <span id="updateVersion" class="update-version-tag">v1.4.0</span></strong>
+          <span class="update-current-hint" id="updateCurrentHint">(actuelle : v1.3.0)</span>
+        </div>
+        <div class="update-banner-notes" id="updateNotes"></div>
+      </div>
+      <div class="update-banner-actions">
+        <button type="button" class="primary" id="updateDownloadBtn">Télécharger la mise à jour</button>
+        <button type="button" class="ghost" id="updateDismissBtn" title="Masquer l'alerte">Plus tard</button>
+      </div>
+    </div>
+
+    <section id="sec-overlay">
+      <div style="margin-bottom: 18px;">
+        <h2>Overlay en jeu</h2>
+        <p class="hint">Affichage transparent par-dessus Rocket League en temps réel (EAC compliant, zero injection).</p>
+      </div>
+
+      <!-- CARTE 1 : ACTIVATION & STYLE -->
+      <div class="settings-card">
+        <div class="card-header">
+          <div class="card-title">Affichage & Thème</div>
+          <div class="card-badge">Raccourci : <kbd>Ctrl</kbd> + <kbd>Maj</kbd> + <kbd>O</kbd></div>
+        </div>
+
+        <div class="card-body">
+          <label class="toggle toggle-prominent">
+            <input type="checkbox" id="overlayEnabled">
+            <span class="toggle-text">
+              <strong>Activer l'overlay par-dessus Rocket League</strong>
+              <small>Le jeu doit être configuré en mode « Fenêtré sans bordure » (Borderless).</small>
+            </span>
+          </label>
+
+          <label class="toggle" style="margin-top: 12px;">
+            <input type="checkbox" id="onlyInGame">
+            <span>Afficher uniquement quand Rocket League est au premier plan (masquage automatique au Alt-Tab)</span>
+          </label>
+
+          <div class="preview-banner" style="margin-top: 16px; padding: 12px 14px; background: rgba(54, 169, 255, 0.08); border: 1px solid rgba(54, 169, 255, 0.25); border-radius: var(--radius); display: flex; align-items: center; justify-content: space-between; gap: 14px;">
+            <div style="font-size: 13px; line-height: 1.4;">
+              <strong style="display: block; color: var(--text); font-weight: 600;">Prévisualisation en direct</strong>
+              <span class="hint" style="margin: 0; font-size: 12px;">Affichez temporairement l'overlay sur votre écran pour régler la position, la taille et le thème sans devoir lancer le jeu.</span>
+            </div>
+            <button type="button" class="secondary" id="previewOverlayBtn" style="white-space: nowrap; flex-shrink: 0; font-weight: 600; padding: 7px 14px;">Prévisualiser l'overlay</button>
+          </div>
+
+          <div style="margin-top: 18px;">
+            <div class="group-label">Thème visuel de l'overlay</div>
+            <div class="theme-grid" id="theme">
+              <button type="button" class="theme-card" data-value="rocketstats">
+                <span class="theme-name">Carte Horizontale</span>
+                <span class="theme-desc">Disposition horizontale avec bandeau translucide</span>
+              </button>
+              <button type="button" class="theme-card" data-value="modern">
+                <span class="theme-name">Colonne</span>
+                <span class="theme-desc">Cellules modulaires avec séparateurs fins</span>
+              </button>
+              <button type="button" class="theme-card" data-value="card">
+                <span class="theme-name">Carte Verticale</span>
+                <span class="theme-desc">Widget vertical compact haute densité</span>
+              </button>
+              <button type="button" class="theme-card" data-value="minimal">
+                <span class="theme-name">Ligne</span>
+                <span class="theme-desc">Texte discret avec ombre portée sans cadre</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CARTE 2 : POSITION & DIMENSIONS -->
+      <div class="settings-card">
+        <div class="card-header">
+          <div class="card-title">Position & Dimensions</div>
+        </div>
+
+        <div class="card-body">
+          <div class="grid-two-col">
+            <!-- Emplacement écran -->
+            <div class="sub-col">
+              <div class="group-label">Emplacement sur l'écran</div>
+              <div class="screen" id="position">
+                <button type="button" data-pos="top-left" aria-label="En haut à gauche"></button>
+                <button type="button" data-pos="top-center" aria-label="En haut au centre"></button>
+                <button type="button" data-pos="top-right" aria-label="En haut à droite"></button>
+                <button type="button" data-pos="bottom-left" aria-label="En bas à gauche"></button>
+                <button type="button" data-pos="bottom-center" aria-label="En bas au centre"></button>
+                <button type="button" data-pos="bottom-right" aria-label="En bas à droite"></button>
+              </div>
+
+              <div style="margin-top: 8px;">
+                <button type="button" class="custom-pos-btn" id="customPosBtn">
+                  <span>Position libre (glisser-déposer)</span>
+                </button>
+              </div>
+
+              <div class="margin-inputs">
+                <label class="margin-field">
+                  <span id="labelOffsetX">Marge X</span>
+                  <div class="input-unit">
+                    <input type="number" id="offsetX" step="4">
+                    <small>px</small>
+                  </div>
+                </label>
+                <label class="margin-field">
+                  <span id="labelOffsetY">Marge Y</span>
+                  <div class="input-unit">
+                    <input type="number" id="offsetY" step="4">
+                    <small>px</small>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <!-- Rendu & Échelle -->
+            <div class="sub-col">
+              <div class="slider-group">
+                <div class="slider-row">
+                  <span class="slider-label">Taille (Échelle)</span>
+                  <output id="scaleOut" class="slider-value">100 %</output>
+                </div>
+                <input type="range" id="scale" min="0.6" max="2" step="0.05">
+              </div>
+
+              <div class="slider-group" style="margin-top: 14px;">
+                <div class="slider-row">
+                  <span class="slider-label">Opacité du fond</span>
+                  <output id="opacityOut" class="slider-value">92 %</output>
+                </div>
+                <input type="range" id="opacity" min="0.2" max="1" step="0.05">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CARTE 3 : COULEURS PERSONNALISÉES -->
+      <div class="settings-card">
+        <div class="card-header">
+          <div class="card-title">Couleurs personnalisées</div>
+          <div class="card-actions">
+            <button type="button" class="btn-subtle" id="resetColorsBtn">Réinitialiser les couleurs</button>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <div class="color-grid">
+            <div class="color-item">
+              <label for="colorBg">Fond de l'overlay</label>
+              <div class="color-input-wrap">
+                <input type="color" id="colorBg" value="#0e192d">
+                <span class="color-hex" id="colorBgHex">#0e192d</span>
+              </div>
+            </div>
+
+            <div class="color-item">
+              <label for="colorText">Texte principal</label>
+              <div class="color-input-wrap">
+                <input type="color" id="colorText" value="#ffffff">
+                <span class="color-hex" id="colorTextHex">#ffffff</span>
+              </div>
+            </div>
+
+            <div class="color-item">
+              <label for="colorMuted">Texte secondaire</label>
+              <div class="color-input-wrap">
+                <input type="color" id="colorMuted" value="#8ea3c6">
+                <span class="color-hex" id="colorMutedHex">#8ea3c6</span>
+              </div>
+            </div>
+
+            <div class="color-item">
+              <label for="colorWin">Victoire / MMR positif</label>
+              <div class="color-input-wrap">
+                <input type="color" id="colorWin" value="#2ecc71">
+                <span class="color-hex" id="colorWinHex">#2ecc71</span>
+              </div>
+            </div>
+
+            <div class="color-item">
+              <label for="colorLoss">Défaite / MMR négatif</label>
+              <div class="color-input-wrap">
+                <input type="color" id="colorLoss" value="#ff4757">
+                <span class="color-hex" id="colorLossHex">#ff4757</span>
+              </div>
+            </div>
+
+            <div class="color-item">
+              <label for="colorAccent">Accentuation (Tag / Bordures)</label>
+              <div class="color-input-wrap">
+                <input type="color" id="colorAccent" value="#36a9ff">
+                <span class="color-hex" id="colorAccentHex">#36a9ff</span>
+              </div>
+            </div>
+
+            <div class="color-item">
+              <label for="colorGoal">Série & Objectif MMR</label>
+              <div class="color-input-wrap">
+                <input type="color" id="colorGoal" value="#ffc107">
+                <span class="color-hex" id="colorGoalHex">#ffc107</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CARTE 4 : STATISTIQUES AFFICHÉES (ORGANISÉES PAR CATÉGORIES) -->
+      <div class="settings-card">
+        <div class="card-header">
+          <div class="card-title">Statistiques affichées</div>
+          <div class="card-actions">
+            <button type="button" class="btn-subtle" id="selectAllFields">Tout afficher</button>
+            <span class="dot-sep">•</span>
+            <button type="button" class="btn-subtle" id="selectDefaultFields">Par défaut</button>
+            <span class="dot-sep">•</span>
+            <button type="button" class="btn-subtle" id="clearAllFields">Tout masquer</button>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <div id="fields" class="categorized-fields-wrap">
+            <!-- Injecté dynamiquement par JS en 3 catégories distinctes et aérées -->
+          </div>
+        </div>
+      </div>
+
+      <!-- CARTE 5 : OBJECTIF DE SESSION -->
+      <div class="settings-card">
+        <div class="card-header">
+          <div class="card-title">Objectif de Session</div>
+        </div>
+
+        <div class="card-body">
+          <div class="goal-config-row">
+            <label class="stack" style="flex: 1; min-width: 180px;">
+              <span class="sub-label" style="font-weight: 600; font-size: 13px; color: var(--muted);">MMR cible souhaité</span>
+              <input type="number" id="sessionGoalMmr" step="10" placeholder="ex: 1700" style="font-size: 15px; font-weight: 700; color: #ffc107; padding: 7px 10px;">
+            </label>
+            <label class="toggle" style="flex: 2; min-width: 260px; margin-top: 18px;">
+              <input type="checkbox" id="showGoal">
+              <span style="font-size: 14px;">Afficher la jauge d'objectif dorée sur l'overlay</span>
+            </label>
+          </div>
+
+          <div id="goalPreviewBox" class="goal-preview-box">
+            <div class="goal-preview-header">
+              <span id="goalPreviewTitle">OBJECTIF : 1700 MMR</span>
+              <span id="goalPreviewDiff" style="color: #ffc107; font-weight: 800;">38.0 MMR restant (98% accompli)</span>
+            </div>
+            <div class="goal-preview-track">
+              <div id="goalPreviewFill" class="goal-preview-fill"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="sec-counting">
+      <h2>Parties comptées & Démarrage</h2>
+      <div class="segmented" id="countMode">
+        <button type="button" data-value="all">Toutes</button>
+        <button type="button" data-value="ranked">Ranked uniquement</button>
+        <button type="button" data-value="custom">Au choix</button>
+      </div>
+      <div class="checklist" id="customPlaylists" hidden></div>
+      <label class="toggle"><input type="checkbox" id="autoSwitchPlaylist"><span>Basculer automatiquement de mode selon la playlist jouée (1v1, 2v2, 3v3…)</span></label>
+      <label class="toggle"><input type="checkbox" id="onlineOnly"><span>Ignorer les parties hors ligne (entraînement, parties contre l'IA)</span></label>
+      <label class="toggle"><input type="checkbox" id="countLeave"><span>Compter une partie quittée avant la fin comme une défaite</span></label>
+      <label class="toggle"><input type="checkbox" id="resetOnStart"><span>Repartir de zéro à chaque lancement de l'application</span></label>
+      <label class="toggle"><input type="checkbox" id="resetOnExit"><span>Remettre la session à zéro à la fermeture de l'application</span></label>
+      <label class="toggle"><input type="checkbox" id="autostartWindows"><span>Démarrer automatiquement avec Windows (en veille silencieuse dans le systray)</span></label>
+    </section>
+
+    <section id="sec-api">
+      <h2>Stats API de Rocket League</h2>
+      <p class="api-state" id="apiState"></p>
+
+      <h3>Détection automatique (style BakkesMod)</h3>
+      <div class="auto-platform-box" id="autoPlatformBox">
+        <div class="auto-platform-header">
+          <div class="auto-platform-status">
+            <span class="status-indicator" id="gameRunningDot"></span>
+            <span class="auto-platform-status-text" id="gameRunningStatus">En attente du lancement de Rocket League…</span>
+          </div>
+          <span class="badge badge-detected" id="activePlatformBadge">Auto-adaptatif</span>
+        </div>
+        <div class="auto-platform-details" id="autoPlatformDetails">
+          L'overlay détecte automatiquement d'où Rocket League est lancé (Steam ou Epic Games) et applique les réglages correspondants en direct.
+        </div>
+        <div class="detected-summary-list">
+          <div class="detected-summary-item" id="summaryEpic">
+            <span class="plat-name">Epic Games :</span>
+            <span class="plat-path" id="summaryPathEpic">Recherche…</span>
+            <span class="badge" id="summaryBadgeEpic">-</span>
+          </div>
+          <div class="detected-summary-item" id="summarySteam">
+            <span class="plat-name">Steam :</span>
+            <span class="plat-path" id="summaryPathSteam">Recherche…</span>
+            <span class="badge" id="summaryBadgeSteam">-</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dossier actif ou personnalisé -->
+      <div id="customInstallNotice" style="display: none; margin-top: 10px;">
+        <div style="font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 4px;">Dossier personnalisé sélectionné :</div>
+        <p class="path" id="installDir"></p>
+      </div>
+
+      <div class="buttons" style="margin-top: 10px;">
+        <button type="button" class="secondary" id="detect">Rafraîchir la détection</button>
+        <button type="button" class="secondary" id="choose">Choisir un autre dossier…</button>
+      </div>
+
+      <h3>Fréquence d'envoi</h3>
+      <div class="segmented" id="rate">
+        <button type="button" data-value="10">10 / s (recommandé)</button>
+        <button type="button" data-value="30">30 / s</button>
+        <button type="button" data-value="60">60 / s</button>
+      </div>
+      <p class="hint">Pour des stats de session, 10 suffit : les fins de match sont transmises instantanément quoi qu'il arrive.</p>
+
+      <div class="buttons">
+        <button type="button" class="primary" id="enableApi">Activer la Stats API (Epic & Steam)</button>
+      </div>
+      <p class="message" id="apiMsg" role="status"></p>
+    </section>
+
+    <section id="sec-player">
+      <h2>Joueur & Compte</h2>
+
+      <div class="auto-detect-banner">
+        <div class="auto-detect-info">
+          <div class="auto-detect-title" id="autoDetectTitle">Détection automatique du profil</div>
+          <div class="auto-detect-desc" id="autoDetectDesc">Votre pseudo et plateforme s'adaptent automatiquement au lancement de Rocket League.</div>
+        </div>
+        <button type="button" class="secondary" id="detectPlayerBtn" style="white-space: nowrap; font-size: 12px;">Détecter maintenant</button>
+      </div>
+
+      <div style="margin-top: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; flex-wrap: wrap; gap: 6px;">
+          <h3 style="margin: 0;">Mode affiché par défaut (au menu)</h3>
+          <span style="font-size: 11px; font-weight: 700; color: #2ecc71; letter-spacing: 0.4px;">BASCULE AUTOMATIQUE ACTIVE EN MATCH</span>
+        </div>
+        <div class="segmented" id="focusedPlaylist">
+          <button type="button" data-value="1v1">1v1 (Duel)</button>
+          <button type="button" data-value="2v2">2v2 (Doubles)</button>
+          <button type="button" data-value="3v3">3v3 (Standard)</button>
+        </div>
+        <p class="hint">Affiché sur l'overlay hors match. Dès qu'un match classé démarre, l'overlay s'adapte automatiquement au mode joué (1v1, 2v2, 3v3...).</p>
+      </div>
+
+      <div class="inline" style="margin-top: 14px; align-items: flex-end; gap: 10px;">
+        <label class="stack" style="flex: 1;">Pseudo en jeu
+          <input type="text" id="customName" placeholder="Détecté automatiquement ou saisissez votre pseudo..." spellcheck="false">
+        </label>
+        <label class="stack" style="width: 140px;">Plateforme
+          <select id="playerPlatformSelect" style="height: 38px; background: #112238; color: #fff; border: 1px solid rgba(80, 150, 255, 0.4); border-radius: 6px; padding: 0 10px; font-weight: 600; font-size: 13px;">
+            <option value="epic">Epic Games</option>
+            <option value="steam">Steam</option>
+            <option value="">Détection auto</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="inline" style="margin-top: 8px; gap: 10px; flex-wrap: wrap;">
+        <button type="button" class="secondary" id="checkTrackerBtn" style="font-size: 13px;">Ouvrir mon profil Tracker</button>
+        <button type="button" class="primary" id="syncTrackerBtn" style="font-size: 13px; background: #1f6feb; border-color: #388bfd;">Synchroniser le vrai MMR en direct</button>
+      </div>
+      <div id="syncStatusMsg" style="margin-top: 8px; font-size: 13px; font-weight: 500; display: none; padding: 8px 12px; border-radius: 6px; background: rgba(0,0,0,0.3);"></div>
+      <label class="toggle" style="margin-top: 10px;">
+        <input type="checkbox" id="autoSyncMmr">
+        <span>Synchroniser automatiquement le vrai MMR après chaque match terminé</span>
+      </label>
+
+      <!-- Aperçu immédiat du profil dès la saisie du pseudo -->
+      <div class="player-profile-card" id="playerProfileCard">
+        <div class="pp-icon" id="ppRankImg"></div>
+        <div class="pp-info" style="flex: 1;">
+          <div class="pp-pseudo" id="ppPseudo">Votre Joueur</div>
+          <div class="pp-rank-title" id="ppRankTitle">Platinum III Div. 3</div>
+          <div class="pp-mmr-row">MMR : <b id="ppMmrVal">855.0</b> <span class="pp-badge" id="ppPlatBadge">Epic Games</span></div>
+          <div style="margin-top: 8px;">
+            <div style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; color: var(--muted); margin-bottom: 3px;">
+              <span id="ppDivProgPct">0%</span>
+              <span id="ppDivProgNeeded" style="color: #2db0ff;">+0 MMR pour la div suivante</span>
+            </div>
+            <div style="width: 100%; height: 5px; background: rgba(255,255,255,0.12); border-radius: 3px; overflow: hidden;">
+              <div id="ppDivProgFill" style="height: 100%; width: 0%; background: linear-gradient(90deg, #2db0ff, #b388ff); border-radius: 3px; transition: width 0.6s ease;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="sec-history">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <div>
+          <h2>Historique Multi-Sessions</h2>
+          <p class="hint" style="margin-top: 2px;">Consultez vos sessions passées jour par jour et l'évolution de votre MMR.</p>
+        </div>
+        <!-- Sélecteur de session et filtre par compte -->
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <select id="sessionAccountFilter" style="background: #112238; color: #fff; border: 1px solid rgba(80, 150, 255, 0.4); border-radius: 6px; padding: 6px 12px; font-weight: 600; font-size: 13px;">
+            <option value="all">Tous les comptes</option>
+          </select>
+          <select id="sessionHistorySelect" style="background: #112238; color: #fff; border: 1px solid rgba(80, 150, 255, 0.4); border-radius: 6px; padding: 6px 12px; font-weight: 600; font-size: 13px; max-width: 360px;">
+            <option value="current">Session en cours</option>
+          </select>
+          <button type="button" class="secondary" id="deleteSessionBtn" style="display: none; padding: 6px 10px; font-size: 12px; color: #ff6b6b; border-color: rgba(255, 107, 107, 0.4);" title="Supprimer cette session de l'historique">Supprimer</button>
+        </div>
+      </div>
+
+      <!-- Récapitulatif rapide de la session sélectionnée -->
+      <div id="sessionSummaryCards" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 14px;">
+        <div style="background: rgba(13, 24, 43, 0.7); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 10px; text-align: center;">
+          <div style="font-size: 11px; color: var(--muted); font-weight: 700;">BILAN DU JOUR</div>
+          <div style="font-size: 18px; font-weight: 900; margin-top: 2px;" id="histCardRecord">0V - 0D</div>
+        </div>
+        <div style="background: rgba(13, 24, 43, 0.7); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 10px; text-align: center;">
+          <div style="font-size: 11px; color: var(--muted); font-weight: 700;">NET MMR</div>
+          <div style="font-size: 18px; font-weight: 900; margin-top: 2px; color: var(--blue);" id="histCardMmr">+0.0</div>
+        </div>
+        <div style="background: rgba(13, 24, 43, 0.7); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 10px; text-align: center;">
+          <div style="font-size: 11px; color: var(--muted); font-weight: 700;">WINRATE</div>
+          <div style="font-size: 18px; font-weight: 900; margin-top: 2px; color: #a3ffc2;" id="histCardWinrate">–</div>
+        </div>
+        <div style="background: rgba(13, 24, 43, 0.7); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 10px; text-align: center;">
+          <div style="font-size: 11px; color: var(--muted); font-weight: 700;">MEILLEURE SÉRIE</div>
+          <div style="font-size: 18px; font-weight: 900; margin-top: 2px; color: var(--gold);" id="histCardStreak">0</div>
+        </div>
+      </div>
+
+      <!-- Ventilation par mode / playlist -->
+      <div id="sessionPlaylistsBreakdown" class="hist-playlist-grid" style="display: none;"></div>
+
+      <div style="background: rgba(13, 24, 43, 0.7); border: 1px solid rgba(80, 150, 255, 0.25); border-radius: 8px; padding: 14px; margin-top: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;">
+          <span style="font-weight: 700; font-size: 13px; color: var(--blue); letter-spacing: 0.5px;" id="chartHeaderTitle">COURBE D'ÉVOLUTION DU MMR</span>
+          <span style="font-size: 12px; color: var(--muted);" id="chartSummary">0 match joué</span>
+        </div>
+        <div id="chartContainer" style="width: 100%; height: 140px; position: relative;">
+          <svg id="mmrSvg" width="100%" height="100%" style="overflow: visible;"></svg>
+        </div>
+      </div>
+
+      <h3 style="margin-top: 18px;" id="matchesHeaderTitle">Matchs de la session</h3>
+      <div id="historyMatchList" style="display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; margin-top: 6px;"></div>
+    </section>
+
+    <section id="sec-obs">
+      <h2>OBS / Streamlabs</h2>
+      <h3>Source navigateur</h3>
+      <div class="copy-row">
+        <code id="obsUrl"></code>
+        <button type="button" class="secondary" id="copyUrl">Copier</button>
+      </div>
+      <p class="hint">Ajoute une source « Navigateur » avec cette adresse (largeur 700, hauteur 150). Elle suit les stats affichées ci-dessus.</p>
+
+      <h3>Fichiers texte</h3>
+      <p class="hint">Comme RocketStats : un fichier par stat (wins.txt, losses.txt, streak.txt…), à utiliser en source « Texte ».</p>
+      <div class="buttons">
+        <button type="button" class="secondary" id="openObs">Ouvrir le dossier</button>
+      </div>
+
+      <label class="stack narrow">Port local
+        <input type="number" id="serverPort" min="1024" max="65535">
+      </label>
+      <p class="hint">À ne changer qu'en cas de conflit. Pris en compte au prochain lancement.</p>
+      <p class="message error" id="serverError" hidden></p>
+    </section>
+
+    <footer class="footer">
+      <div class="footer-info">
+        <p>Fermer cette fenêtre laisse l'overlay actif. L'icône près de l'horloge permet de la rouvrir.</p>
+        <div class="update-check-wrapper">
+          <button type="button" class="btn-subtle" id="checkUpdateBtn">Vérifier les mises à jour</button>
+          <span id="updateStatusText" class="update-status-text"></span>
+        </div>
+      </div>
+      <span class="saved" id="saved" aria-live="polite"></span>
+      <button type="button" class="ghost" id="quit">Quitter l'application</button>
+    </footer>
+  </main>
+</div>
+
+<!-- Onglet LobbyTracker : construit par lt.js -->
+<main class="lt-panel" id="tab-lt" hidden></main>
+
+<script src="bridge.js"></script>
+<script src="settings.js"></script>
+<script src="lt.js"></script>
+</body>
+</html>

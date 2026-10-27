@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Autorise les fenêtres de l'appli à communiquer avec le programme",
+  "windows": ["settings", "overlay", "lt-overlay"],
+  "permissions": ["core:default"]
+}
