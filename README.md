@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>A modern, customizable replacement for RocketStats in Rocket League, built for the Easy Anti-Cheat era.</strong>
+  <strong>Session stats and pre-match lobby radar for Rocket League, in one app. Passive, customizable, built for the Easy Anti-Cheat era.</strong>
 </p>
 
 <p align="center">
@@ -27,169 +27,108 @@
 
 ---
 
+## Two projects, one app
+
+RL Tracker Suite is the merge of two projects that both read Rocket League's official Stats API:
+
+| Project | What it does | Repository |
+|---|---|---|
+| **RL Session Stats** | Session tracking: MMR, wins / losses / streak, history, goals, in-game HUD, OBS | [NeyorDEV/rl-session-stats](https://github.com/NeyorDEV/rl-session-stats) |
+| **LobbyTracker** | Pre-match radar: real ranks of the lobby, smurf detection, badges, lobby overlay | [NeyorDEV/lobbytracker](https://github.com/NeyorDEV/lobbytracker) |
+
+They shared most of their plumbing (Stats API connection, game and account detection, Tracker Network access, overlay windows, OBS server, settings), so the merge keeps **one** implementation of each instead of two. The app has two tabs, **Session Stats** and **LobbyTracker**; see [Project layout](#project-layout) for what is shared.
+
+The two original repositories remain available as the history of each project. New development happens here.
+
+---
+
 ## 100% Safe with Easy Anti-Cheat (No Ban Risk)
 
 Ever since **Easy Anti-Cheat (EAC)** was introduced in Rocket League, traditional BakkesMod plugins and memory injectors are blocked or risk permanent account bans.
 
-**RL Tracker Suite uses ZERO injection, ZERO DLL hooking, and ZERO memory reading.**  
-It exclusively communicates through Rocket League's **official native local telemetry Stats API** (`TAGame.MatchStatsExporter_TA`) via a local TCP socket on `127.0.0.1:49123`. You can play online competitive matches normally with EAC fully enabled without any risk.
+**RL Tracker Suite uses ZERO injection, ZERO DLL hooking, and ZERO memory reading.**
+It only communicates through Rocket League's **official native local telemetry Stats API** (`TAGame.MatchStatsExporter_TA`) via a local TCP socket on `127.0.0.1:49123`, and reads the game's own `Launch.log` in read-only mode. The overlays are separate transparent windows: nothing is drawn inside the game. You can play online competitive matches normally with EAC fully enabled.
+
+> No tool can promise zero risk, and there is no guarantee from Epic. The design simply avoids every technique anti-cheats target.
 
 ---
 
 ## Features
 
-* **Multiple HUD Styles & Layouts**:
-  * **Carte Horizontale**: Classic horizontal banner with high-resolution SVG rank badges, MMR readout, match delta indicator, and win/loss/streak counters.
-  * **Colonne**: Modular cells with clean dividers and individual metrics.
-  * **Carte Verticale**: Compact vertical side-widget format.
-  * **Ligne**: Pure text & icon layout with shadow effects and zero bounding box.
-* **MMR & Real-Time Sync**:
-  * **Automatic Live MMR Sync**: Invisible, headless background sync via Rocket League Tracker Network (zero manual MMR entry needed).
-  * **Accurate Official Brackets**: Exact MMR thresholds for 1v1, 2v2, and 3v3 (e.g. 1656 ELO = Grand Champion II Div. 3).
-  * **Division Progress Bar**: Live progress percentage and exact MMR required to rank up to the next division.
-  * **Floating Badges & Celebrations**: In-game floating MMR delta badges (`+11.2` / `-8.9`) and animated banners on Rank Up and Division Up.
-  * **Focused Playlist Selector**: Focus on 1v1 (Duel), 2v2 (Doubles), or 3v3 (Standard) with instant tier & division recalculation.
-  * **HD Modern Rank Icons**: Authentic transparent 256x256 post-F2P badges (including ruby GC1, GC2, GC3, and Supersonic Legend).
-  * **Automatic Post-Match Synchronization**: Option to sync official tracker MMR automatically after each finished match.
-* **Multi-Session History**:
-  * **Day-by-Day Session Browser**: Browse previous game sessions day by day.
-  * **Interactive MMR Progression Curve**: Vector SVG graph illustrating MMR evolution match after match.
-  * **Match-by-Match Breakdown**: Detailed cards displaying playlist, result, MMR delta, and individual score/stats for each match.
-  * **4 Live Summary Cards**: Record (W - L), Net MMR delta, Winrate, and Streak.
-* **Session Goal Tracking**:
-  * Configurable target MMR objective with a progress bar and exact remaining MMR required.
-* **Deep Customization & Colors**:
-  * **Fully Configurable Colors**: Customize every color of the overlay (Background, Primary Text, Secondary Text, Wins / Positive MMR, Losses / Negative MMR, Accent tags, and Goal/Streak).
-  * **Opacity & Scale**: Adjust opacity (20% to 100%) and scale (60% to 200%).
-  * **Screen Positioning**: Interactive 6-position screen grid with pixel-precise horizontal and vertical margin controls.
-  * **Categorized Stat Selection**: Toggle individual stats cleanly categorized into *Rank & MMR*, *Session Results*, and *Match Events*.
-* **Native Process Watcher & Autostart**:
-  * **Ultra-Fast Game Watcher**: Native Win32 snapshot check puts overlay to sleep when Rocket League is closed and wakes up automatically upon game launch.
-  * **Silent System Tray Autostart**: Windows startup option starts quietly in the background without UI freezes.
-  * **Auto-Reset on Exit**: Option to automatically start fresh sessions whenever the application closes.
-* **OBS & Streamlabs Ready**:
-  * **Browser Source**: Stream real-time stats via the local web server (`http://localhost:5177/overlay`) powered by Server-Sent Events (SSE).
-  * **Text Files**: Automatically generates and updates `.txt` files for text sources (`mmr.txt`, `mmr_change.txt`, `mmr_session.txt`, `rank.txt`, `division.txt`, `rank_full.txt`, `wins.txt`, `losses.txt`, `streak.txt`, etc.).
-* **Ultra Lightweight**: Built on **Tauri 2 (Rust)** and vanilla web technologies with minimal CPU and RAM footprint.
+### Tab 1 - Session Stats
+
+* **Multiple HUD styles & layouts**: horizontal card, column, vertical card and plain-line layouts with high-resolution rank badges, MMR readout, match delta and win / loss / streak counters.
+* **MMR & real-time sync**:
+  * Automatic live MMR sync through Rocket League Tracker Network (invisible background window, no manual entry).
+  * Accurate official brackets for 1v1, 2v2 and 3v3, with a division progress bar and the exact MMR needed to rank up.
+  * Floating MMR delta badges (`+11.2` / `-8.9`) and banners on rank up and division up.
+  * Focused playlist selector (1v1, 2v2, 3v3) with automatic playlist switching.
+  * Optional automatic sync after each finished match.
+* **Multi-session history**: day-by-day browser, interactive MMR curve, match-by-match breakdown, per-playlist statistics and summary cards (record, net MMR, winrate, streak).
+* **Session goal tracking** with a progress bar.
+* **Deep customization**: every overlay color, opacity (20-100 %), scale (60-200 %), a 6-position screen grid with pixel margins or free drag-and-drop, and per-category stat selection.
+* **Native process watcher & autostart**: the overlay sleeps when Rocket League is closed or in the background, silent tray autostart, optional auto-reset on exit.
+* **Multi-account**: the account is detected at each game launch (Epic or Steam) and each one keeps its own session.
+
+### Tab 2 - LobbyTracker
+
+* **Live lobby analysis**: every player of the match is looked up on Tracker Network (opponents first) and shown with their real ranks. Profiles are cached in SQLite (24 h by default) so known players appear instantly.
+* **Badges, each of them can be turned off** (a disabled badge is neither computed nor sent to the overlay):
+
+  | Badge | Default rule |
+  |---|---|
+  | **Potentiel smurf** | fewer than 250 total wins and rank at least Champion 2 (thresholds adjustable), or a young account climbing fast (at least 15 recent ranked matches, 70 % wins and +150 MMR), plus a 0-100 *Smurf Index* |
+  | **Joueur 1v1** | 1v1 rank at least 2 tiers above the lobby's 2v2 / 3v3 median (10+ duel matches) |
+  | **Gardien** | at least 1.6 saves per match and saves at least 2.5 times goals |
+  | **Lose streak : N** | 3 or more consecutive losses, shows the count |
+  | **Ancien haut rang** | peak at least Champion 2 and current rank at least 2 tiers below the peak |
+  | *Opponents only* | hides the teammates |
+
+* **Its own overlay**: four layouts (horizontal cards, column, vertical cards, row), screen position or free drag, margins, scale (50-200 %), opacity, 11 customizable colors, live preview.
+* **Automatic hiding**: never, **when the 3-2-1 countdown ends** (Stats API `RoundStarted` event), or after a delay.
+* **Shortcut**: <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd> (also in the tray menu).
+* **OBS**: the same overlay as a browser source, honoring the layout, colors and scale.
 
 ---
 
-## LobbyTracker tab (new)
+## Download & Quick Start
 
-The app now has two tabs: **Session Stats** (everything above) and **LobbyTracker**, a passive pre-match radar built on the same Stats API connection.
+Pre-compiled Windows binaries are published on the **[Latest Release](https://github.com/NeyorDEV/rl-tracker-suite/releases/latest)** page:
 
-* **Live lobby analysis**: every player of the match is looked up on Tracker Network (opponents first, results cached in SQLite for 24 h) and shown on a dedicated overlay with their real ranks.
-* **Badges, each one can be turned off**: *Potentiel smurf* (few wins at a high rank, or a young account climbing fast), *Joueur 1v1*, *Gardien*, *Lose streak : N* (from 3 losses), *Ancien haut rang*, plus an *opponents only* filter and a 0-100 *Smurf Index*.
-* **Its own overlay**: 4 layouts (horizontal cards, column, vertical cards, row), screen position / margins / free drag, scale, opacity, 11 customisable colours, live preview, and automatic hiding either **when the 3-2-1 countdown ends** (`RoundStarted` event) or after a delay.
-* **Shortcut**: <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd> toggles the lobby overlay (tray menu entry too).
-* **OBS**: add a Browser Source on `http://localhost:5177/lobby` (same port as the session overlay).
+* **RL Tracker Suite (portable).exe**: standalone executable, no installation required.
+* **RL Tracker Suite Setup (.exe)**: standard installer with desktop and Start menu shortcuts.
 
-The Stats API, the game detection, the player detection and the OBS port are the ones of the Session Stats tab: nothing to configure twice.
+> *Windows SmartScreen may warn about unsigned open-source binaries on first run. Click **More info** -> **Run anyway**.*
 
-## Download & Quick Start (Zero-Install)
+1. **Close Rocket League** before enabling the API *(the game overwrites its configuration files when it exits)*.
+2. **Launch RL Tracker Suite**. In the **Session Stats** tab, **Stats API de Rocket League** section, click **Activer la Stats API**. The app finds your Epic Games or Steam installation and sets `PacketSendRate` in `DefaultStatsAPI.ini` (a `.bak` backup is kept). The Stats API is shared by both tabs.
+3. **Account**: it is detected automatically when the game starts. You can also type your in-game name and pick a focused playlist in **Joueur & Compte**, then sync your MMR.
+4. **In Rocket League**, set **Options -> Video -> Window Mode: Borderless** so transparent overlays can be drawn on top of the game.
+5. **Play.** Session stats update after each match; the lobby overlay appears when the players of a match arrive.
 
-You can download pre-compiled, ready-to-use Windows binaries directly from the **[Latest Release](https://github.com/NeyorDEV/rl-tracker-suite/releases/latest)**:
+> **Pro tip**: press <kbd>Win</kbd> + <kbd>R</kbd>, type `shell:startup` and paste a shortcut to the portable `.exe`. The app starts silently in the tray (~0 % CPU) and is always ready.
 
-* **[RL Tracker Suite (portable).exe](https://github.com/NeyorDEV/rl-tracker-suite/releases/latest/download/RL.Tracker.Suite.portable.exe)** : Standalone portable executable (no installation required, simply double-click and run).
-* **[RL Tracker Suite Setup (.exe)](https://github.com/NeyorDEV/rl-tracker-suite/releases/latest/download/RL.Tracker.Suite_1.4.0_x64-setup.exe)** : Standard Windows installer with desktop and Start menu shortcuts.
+### Coming from the previous apps
 
-> *Note: Windows SmartScreen may show an untrusted warning on the first run for unsigned open-source binaries. Click **More info** -> **Run anyway**.*
-
----
-
-## Quick Start & Setup Walkthrough
-
-Get everything up and running in 2 minutes:
-
-1. **Close Rocket League** before enabling the API *(important: Rocket League overwrites configuration files upon exiting)*.
-2. **Launch `RL Tracker Suite`**:
-   - In the **Rocket League Stats API** section, click **Activer la Stats API** (*Enable Stats API*). The application automatically locates your Steam or Epic Games installation and configures `DefaultStatsAPI.ini` (a `.bak` backup is preserved).
-3. **Configure your account & playlist**:
-   - Under the **Player & Account** (*Joueur & Compte*) section:
-     - Select **Epic Games** or **Steam**.
-     - Type your exact **in-game username**.
-     - Select your focused playlist: **1v1 (Duel)**, **2v2 (Doubles)**, or **3v3 (Standard)**.
-     - Click **Synchroniser le vrai MMR en direct** to instantly fetch your official MMR from Tracker Network. *(You can also toggle automatic synchronization after every match).*
-4. **Launch Rocket League** and configure video settings:
-   - Navigate to **Options -> Video -> Window Mode: Borderless**. This allows Windows to render transparent overlays on top of the game.
-5. **Play!**
-   - At the end of each game, your wins, losses, goals, saves, and MMR update and display in real time with floating delta badges and celebratory division rank up animations.
-   - All session data is stored in your multi-session history so you can review previous days anytime.
-
-> **Pro Tip (Auto-start with Windows)**: To never worry about launching the tool before playing, press <kbd>Win</kbd> + <kbd>R</kbd>, type `shell:startup`, and paste a shortcut to `RL Tracker Suite (portable).exe`. The app will launch silently in your system tray on boot (~0% CPU) and will always be synced!
+On first launch, if the new data folder is empty, the settings, history and sessions of the former RL Session Stats app (`%APPDATA%\fr.rlsessionstats.app`) are imported automatically. The old app is left untouched. LobbyTracker had its own settings file and starts with defaults.
 
 ---
 
 ## Controls & Shortcuts
 
-* <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> : Toggle overlay visibility in-game.
-* **Tray Icon**: Right-click the system tray icon near your clock to open settings, reset session, or quit.
-* **Reset Session**: Two-step confirmation button to reset session stats.
+* <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd>: show / hide the session overlay.
+* <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd>: show / hide the lobby overlay.
+* **Tray icon**: open the settings, toggle either overlay, reset the session, or quit.
 
 ---
 
 ## OBS Studio / Streamlabs Setup
 
-* **Browser Source**:
-  - Add a new **Browser** source.
-  - URL: `http://localhost:5177/overlay`
-  - Width: `750` | Height: `180`
-* **Text Files**:
-  - Click **Ouvrir le dossier** in the settings to access your OBS text files folder:
-    - `mmr.txt`
-    - `mmr_change.txt`
-    - `rank_full.txt` (`Diamond I Div. 2`)
-    - `wins.txt`, `losses.txt`, `streak.txt`, `winrate.txt`, etc.
+* **Session overlay**: Browser source, URL `http://localhost:5177/overlay`, width `750`, height `180`.
+* **Lobby overlay**: Browser source, URL `http://localhost:5177/lobby` (same port).
+* **Text files** (session): click **Ouvrir le dossier** in the settings to get `mmr.txt`, `mmr_change.txt`, `rank_full.txt`, `wins.txt`, `losses.txt`, `streak.txt`, `winrate.txt`, etc.
 
----
-
-## Building from Source
-
-If you want to compile locally:
-
-### Prerequisites
-* [Node.js](https://nodejs.org/) (v18+)
-* [Rust](https://rustup.rs/) (stable toolchain)
-* Windows C++ Build Tools (via Visual Studio Installer)
-
-### Development
-```powershell
-# Clone the repository
-git clone https://github.com/NeyorDEV/rl-tracker-suite.git
-cd rl-tracker-suite
-
-# Install Tauri CLI
-npm install
-
-# Run automated tests
-cargo test --manifest-path src-tauri/Cargo.toml
-
-# Start development mode
-npx @tauri-apps/cli dev
-
-# Build production bundle (.exe & setup to build-output/)
-npm run build
-```
-
----
-
-## Code Signing & Integrity
-
-Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).
-
----
-
-## Privacy Policy
-
-RL Tracker Suite respects your privacy:
-* **Zero telemetry & zero data collection**: All telemetry stays on your local machine.
-* For more details, see [PRIVACY.md](PRIVACY.md).
-
----
-
-## License
-
-This project is licensed under the [MIT License](LICENSE) - see the LICENSE file for details.
+The port can be changed in the OBS section of the Session Stats tab.
 
 ---
 
@@ -205,28 +144,60 @@ crates/
   tracker-scraper     Tracker Network mapping, priority queue, API-token fallback
   tracker-engine      lobby state, glue between the crates
 ui/                   settings.html (tabs) + settings.js (Session Stats) + lt.js (LobbyTracker)
-                      overlay.html (session) / lobby-overlay.html (lobby, in-game and OBS)
+                      overlay.html (session) / lobby-overlay.html (lobby, in game and OBS)
 ```
 
-RL Tracker Suite merges the former **RL Session Stats** app and **LobbyTracker**. LobbyTracker reuses the Session Stats code instead of duplicating it:
+What the two tabs share instead of duplicating:
 
-| Need | Shared Session Stats code |
+| Need | Shared code |
 |---|---|
-| Stats API connection and JSON stream decoding | `stats_client.rs` (events are forwarded to the lobby engine) |
-| Enabling the Stats API, install detection (Epic / Steam), launch detection | `rl_config.rs` and the "Stats API" section |
+| Stats API connection and JSON stream decoding | `stats_client.rs` (events are also forwarded to the lobby engine) |
+| Enabling the Stats API, Epic / Steam install detection, launch detection | `rl_config.rs` and the "Stats API" section |
 | Local account detection at each game launch | the game watcher in `main.rs` |
-| Hidden WebView2 access to Tracker Network (Cloudflare) | `trn_web.rs`, extracted from the MMR sync and shared by both tabs |
-| Local OBS server | `web_server.rs` (a second SSE channel `/lobby/events`) |
-| Settings file, persistence | `settings.rs` (LobbyTracker settings live in the `lobbytracker` section of `settings.json`) |
+| Hidden WebView2 access to Tracker Network (Cloudflare) | `trn_web.rs`, used by the MMR sync and by the lobby lookups |
+| Local OBS server | `web_server.rs` (two server-sent-event channels) |
+| Settings file | `settings.rs` (LobbyTracker settings live in the `lobbytracker` section) |
 | Overlay window placement and drag | `show_overlay_window`, `overlay_origin`, `drag_window_by` in `main.rs` |
-| Visual components of the settings page | the same CSS classes (theme cards, screen grid, sliders, colour grid) |
-| Updates | the existing release check |
+| Settings page components | the same CSS classes (theme cards, screen grid, sliders, color grid) |
 
-On first launch, settings, history and sessions of the former RL Session Stats app (`%APPDATA%\fr.rlsessionstats.app`) are imported automatically if the new data folder is empty; the old app is left untouched.
+**Cloudflare workaround**: Tracker Network returns 403 to bare HTTP clients, so profiles are read from a hidden WebView2 window that loads the public profile page like a real browser. An official TRN API token can be set as a fallback. Use of Tracker Network data remains subject to their terms of service.
 
-### Build and tests
+---
 
-```bash
-cargo test --workspace     # 16 app tests + the LobbyTracker crates
-npm run build              # tauri build, then copies the .exe files to build-output/
+## Known limitations
+
+* The lobby needs the Stats API (`PacketSendRate` above 0). Without it, the Session Stats tab has nothing to count and the LobbyTracker tab shows no players.
+* Epic, Xbox and PSN accounts are looked up on Tracker Network **by name**, so a player whose name is not known yet stays in "loading". Steam accounts are looked up by ID.
+* Tracker Network does not expose account age or demolition statistics, so neither is used.
+* The Tracker Network schema is read tolerantly but is not guaranteed to stay stable.
+* The `RoundStarted` kickoff event follows the Stats API documentation; it was tested against a simulated Stats API, not yet against a full real match.
+
+---
+
+## Building from Source
+
+Prerequisites: [Node.js](https://nodejs.org/) (v18+), [Rust](https://rustup.rs/) (stable), Windows C++ Build Tools.
+
+```powershell
+git clone https://github.com/NeyorDEV/rl-tracker-suite.git
+cd rl-tracker-suite
+
+npm install                  # Tauri CLI
+cargo test --workspace       # application + LobbyTracker crates
+npx @tauri-apps/cli dev      # development mode
+npm run build                # production bundle, .exe files copied to build-output/
 ```
+
+---
+
+## Privacy Policy
+
+RL Tracker Suite respects your privacy: zero telemetry, zero data collection, everything stays on your machine. Players of your lobby are looked up on Tracker Network from a hidden browser window. See [PRIVACY.md](PRIVACY.md).
+
+---
+
+## License & Credits
+
+Released under the [MIT License](LICENSE).
+
+Built from [RL Session Stats](https://github.com/NeyorDEV/rl-session-stats) and [LobbyTracker](https://github.com/NeyorDEV/lobbytracker) by [NeyorDEV](https://github.com/NeyorDEV).
