@@ -785,6 +785,17 @@ fn open_browser_url(url: String) {
     let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
 }
 
+/// Encode un pseudo pour un segment d'URL : tout ce qui n'est pas une lettre, un chiffre ou
+/// `- _ . ~` est écrit en `%XX` (octets UTF-8), sinon `/`, `?`, `%`, `&` cassent l'adresse.
+pub(crate) fn encode_path_segment(raw: &str) -> String {
+    raw.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
 async fn perform_tracker_sync(app: AppHandle) -> Result<Value, String> {
     let (platform, username, focus) = {
         let ctx = app.state::<Ctx>();
@@ -821,18 +832,10 @@ async fn perform_tracker_sync(app: AppHandle) -> Result<Value, String> {
         return Err("Veuillez d'abord renseigner votre pseudo dans l'onglet Joueur.".into());
     }
 
-    let encoded_user: String = username
-        .chars()
-        .map(|c| match c {
-            ' ' => "%20".to_string(),
-            '#' => "%23".to_string(),
-            _ => c.to_string(),
-        })
-        .collect();
+    let encoded_user = encode_path_segment(&username);
 
-    let page_url = format!("https://rocketleague.tracker.network/rocket-league/profile/{platform}/{encoded_user}");
     let api_url = format!("https://api.tracker.gg/api/v2/rocket-league/standard/profile/{platform}/{encoded_user}");
-    let json = trn_web::fetch_json(&app, &page_url, &api_url).await?;
+    let json = trn_web::fetch_json(&app, &api_url).await?;
     let Some(segments) = json["data"]["segments"].as_array().cloned() else {
         return Err("Profil Tracker Network inattendu : aucune statistique.".into());
     };

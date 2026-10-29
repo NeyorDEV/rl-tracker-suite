@@ -25,10 +25,12 @@ struct AppWebFetch(AppHandle);
 
 #[async_trait]
 impl WebFetch for AppWebFetch {
-    async fn get_json(&self, page_url: &str, api_url: &str) -> Result<Value, ScrapeError> {
-        crate::trn_web::fetch_json(&self.0, page_url, api_url).await.map_err(|e| {
+    async fn get_json(&self, api_url: &str) -> Result<Value, ScrapeError> {
+        crate::trn_web::fetch_json(&self.0, api_url).await.map_err(|e| {
             if e.contains("introuvable") {
                 ScrapeError::NotFound
+            } else if e.contains("429") {
+                ScrapeError::RateLimited
             } else if e.contains("Délai") {
                 ScrapeError::Timeout
             } else {

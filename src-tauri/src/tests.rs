@@ -296,6 +296,15 @@ fn reprise_des_donnees_de_l_ancienne_appli() {
 }
 
 #[test]
+fn pseudo_encode_pour_une_url() {
+    use crate::encode_path_segment as enc;
+    assert_eq!(enc("neyor."), "neyor.");
+    assert_eq!(enc("Jean Dupont"), "Jean%20Dupont");
+    assert_eq!(enc("é"), "%C3%A9");
+    assert_eq!(enc("a/b?x=1&y#z%"), "a%2Fb%3Fx%3D1%26y%23z%25");
+}
+
+#[test]
 fn serveur_obs() {
     let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
     let web = WebServer::start(

@@ -9,6 +9,7 @@ pub mod lobby;
 
 use lobby::{Lobby, Upsert};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -23,6 +24,19 @@ use tracker_scraper::{
     FetchOptions, Fetcher, HybridFetcher, Priority, ScrapeError, SourceFetcher, TrackerQueue, TrnApiSource,
     WebFetch, WebSource,
 };
+
+/// Un joueur dont la recherche vient d'échouer n'est pas redemandé pendant ce délai.
+const FAILURE_MEMORY_SECS: i64 = 600;
+/// Délai minimum entre deux recherches de profil.
+const LOOKUP_INTERVAL: Duration = Duration::from_millis(3000);
+
+/// Pseudo masqué par le mode anonyme du jeu (« Player 3 ») : inutile de le chercher.
+fn is_anonymous_name(name: &str) -> bool {
+    name.trim()
+        .to_ascii_lowercase()
+        .strip_prefix("player ")
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
@@ -65,6 +79,8 @@ struct Inner {
     detected_self: Mutex<Option<(PlayerId, Option<String>)>>,
     /// Affiche un lobby fictif à la place du vrai (bouton « Prévisualiser »).
     preview: AtomicBool,
+    /// Joueurs dont la recherche a échoué récemment (heure Unix), pour ne pas insister.
+    failures: Mutex<HashMap<PlayerId, i64>>,
 }
 
 pub struct Engine {
@@ -95,6 +111,7 @@ impl Engine {
             kickoffs,
             detected_self: Mutex::new(None),
             preview: AtomicBool::new(false),
+            failures: Mutex::default(),
         });
 
         let mut sources: Vec<Arc<dyn Fetcher>> = Vec::new();
@@ -173,7 +190,7 @@ impl Engine {
             inner.cache.clone(),
             cfg.cache_ttl_hours as i64 * 3600,
             options,
-            Duration::from_millis(1200),
+            LOOKUP_INTERVAL,
             out_tx,
         ));
         let i = inner.clone();
@@ -277,7 +294,7 @@ impl Inner {
         // Hors Steam, Tracker Network cherche par pseudo : on attend de le connaître.
         let needs_name = id.platform != Platform::Steam;
         if state == Upsert::Changed && loading && lookup.is_some() && needs_name {
-            self.queue.enqueue_named(id, priority_of(relation), lookup);
+            self.request_profile(id, relation, lookup);
             self.emit();
             return;
         }
@@ -289,20 +306,39 @@ impl Inner {
                 Ok(Some(profile)) => {
                     self.lobby.lock().unwrap().set_profile(profile);
                 }
-                Ok(None) => {
-                    if !needs_name || lookup.is_some() {
-                        self.queue.enqueue_named(id, priority_of(relation), lookup);
-                    }
-                }
+                Ok(None) => self.request_profile(id, relation, lookup),
                 Err(e) => {
                     tracing::warn!("lecture du cache impossible : {e}");
-                    if !needs_name || lookup.is_some() {
-                        self.queue.enqueue_named(id, priority_of(relation), lookup);
-                    }
+                    self.request_profile(id, relation, lookup);
                 }
             }
         }
         self.emit();
+    }
+
+    /// Demande le profil d'un joueur à Tracker Network, sauf si c'est inutile ou déjà perdu
+    /// d'avance : pseudo anonyme (« Player 3 »), pseudo encore inconnu, échec très récent.
+    /// Chaque requête évitée ménage le site (qui bloque les clients trop bavards).
+    fn request_profile(&self, id: PlayerId, relation: Relation, lookup: Option<String>) {
+        let needs_name = id.platform != Platform::Steam;
+        if needs_name && lookup.is_none() {
+            return;
+        }
+        if needs_name && lookup.as_deref().is_some_and(is_anonymous_name) {
+            self.lobby.lock().unwrap().set_failed(&id);
+            return;
+        }
+        let recently_failed = self
+            .failures
+            .lock()
+            .unwrap()
+            .get(&id)
+            .is_some_and(|at| unix_now() - at < FAILURE_MEMORY_SECS);
+        if recently_failed {
+            self.lobby.lock().unwrap().set_failed(&id);
+            return;
+        }
+        self.queue.enqueue_named(id, priority_of(relation), lookup);
     }
 
     fn apply_outcome(&self, outcome: tracker_scraper::FetchOutcome) {
@@ -314,6 +350,10 @@ impl Inner {
                 }
                 tracker_scraper::FetchOutcome::Failed { id, error } => {
                     tracing::info!("profil {id} indisponible : {error}");
+                    // Un blocage général (429) n'est pas la faute du joueur : on le réessaiera.
+                    if !error.contains("429") {
+                        self.failures.lock().unwrap().insert(id.clone(), unix_now());
+                    }
                     lobby.set_failed(&id);
                 }
             }
@@ -422,6 +462,34 @@ mod tests {
         assert_eq!(snap.players[0].name, "Foe", "adversaires en premier");
         assert_eq!(snap.pending, 2);
         // L'adversaire est servi avant le coéquipier même s'il est arrivé après.
+        assert_eq!(e.inner.queue.pop_next(), Some(id(2)));
+    }
+
+    #[test]
+    fn anonymous_names_are_never_looked_up() {
+        assert!(is_anonymous_name("Player 3") && is_anonymous_name(" player 12 "));
+        assert!(!is_anonymous_name("Player") && !is_anonymous_name("Player One") && !is_anonymous_name("Neyor"));
+
+        let e = engine(Config::default());
+        let epic = PlayerId::new(Platform::Epic, EPIC);
+        e.inject_player(epic.clone(), Some("Player 2".into()), Some(Team::Orange));
+        let snap = e.snapshot();
+        assert_eq!(snap.players[0].status, PlayerStatus::Failed);
+        assert_eq!(e.inner.queue.pending(), 0, "aucune requête pour un pseudo anonyme");
+        // Un compte Steam se cherche par identifiant : le pseudo anonyme n'y change rien.
+        e.inject_player(id(5), Some("Player 4".into()), Some(Team::Orange));
+        assert_eq!(e.inner.queue.pending(), 1);
+    }
+
+    #[test]
+    fn a_recent_failure_is_not_retried_but_a_global_block_is() {
+        let e = engine(Config::default());
+        e.inner.apply_outcome(tracker_scraper::FetchOutcome::Failed { id: id(1), error: "profil introuvable".into() });
+        e.inner.apply_outcome(tracker_scraper::FetchOutcome::Failed { id: id(2), error: "HTTP 429".into() });
+        e.inner.lobby.lock().unwrap().reset();
+        e.inject_player(id(1), Some("Gone".into()), None);
+        e.inject_player(id(2), Some("Busy".into()), None);
+        assert_eq!(e.inner.queue.pending(), 1, "seul le joueur bloqué par le 429 est redemandé");
         assert_eq!(e.inner.queue.pop_next(), Some(id(2)));
     }
 
