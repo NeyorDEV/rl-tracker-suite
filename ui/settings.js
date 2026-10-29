@@ -1090,9 +1090,12 @@ function bind() {
   $('checkTrackerBtn').addEventListener('click', () => {
     const pl = S?.settings?.player || {};
     const plat = pl.platform || 'epic';
-    const name = pl.customName || $('customName').value.trim();
-    if (name) {
-      const url = `https://rocketleague.tracker.network/rocket-league/profile/${encodeURIComponent(plat)}/${encodeURIComponent(name)}/overview`;
+    let target = pl.customName || $('customName').value.trim();
+    if (plat === 'steam' && pl.detectedId && pl.detectedId.startsWith('7656') && pl.detectedId.length === 17) {
+      target = pl.detectedId;
+    }
+    if (target) {
+      const url = `https://rocketleague.tracker.network/rocket-league/profile/${encodeURIComponent(plat)}/${encodeURIComponent(target)}/overview`;
       app.openBrowserUrl(url);
     } else {
       alert("Veuillez d'abord saisir votre pseudo dans le champ 'Pseudo en jeu'.");

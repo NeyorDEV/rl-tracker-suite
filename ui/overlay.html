@@ -224,7 +224,7 @@
     border: 1px solid var(--edge);
     border-radius: 8px;
     padding: 12px 16px;
-    min-width: 260px;
+    min-width: 270px;
     width: max-content;
     display: flex;
     flex-direction: column;
@@ -242,6 +242,8 @@
   .theme-card .tc-row {
     display: flex;
     justify-content: space-between;
+    align-items: center;
+    gap: 16px;
     font-size: 14px;
     font-weight: 700;
   }
@@ -986,8 +988,13 @@
     const scale = Number(display.scale) || 1.0;
     const opacity = Number(display.opacity) !== undefined ? Number(display.opacity) : 0.92;
 
-    container.style.transform = `scale(${scale})`;
-    container.style.transformOrigin = '0 0';
+    if ('zoom' in container.style) {
+      container.style.zoom = String(scale);
+      container.style.transform = '';
+    } else {
+      container.style.transform = `scale(${scale})`;
+      container.style.transformOrigin = '0 0';
+    }
     container.style.opacity = String(opacity);
 
     if (isApp) {
@@ -1003,6 +1010,7 @@
     reportSize();
     setTimeout(reportSize, 100);
     setTimeout(reportSize, 300);
+    setTimeout(reportSize, 600);
   }
 
   let lastReportedW = 0;
@@ -1017,9 +1025,9 @@
       const elRect = el.getBoundingClientRect();
       const maxW = Math.max(rect.width, elRect.width);
       const maxH = Math.max(rect.height, elRect.height);
-      // Marge de confort pour padding (14px * 2) et box-shadow
-      const w = Math.ceil(maxW) + 44;
-      const h = Math.ceil(maxH) + 38;
+      // Marge de confort pour padding (14px * 2), box-shadow et bordures Windows non-client (8px chaque côté)
+      const w = Math.ceil(maxW) + 56;
+      const h = Math.ceil(maxH) + 48;
       if (Math.abs(w - lastReportedW) >= 2 || Math.abs(h - lastReportedH) >= 2) {
         lastReportedW = w;
         lastReportedH = h;

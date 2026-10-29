@@ -408,6 +408,15 @@ fn parse_player_from_log_steam() {
     assert_eq!(detected.platform, "steam");
     assert_eq!(detected.name, "SquishyMuffinz");
     assert_eq!(detected.id, "76561198000000000");
+
+    let log_sample_spaces = r#"
+[0001.23] Init: Steam initialized
+[0005.12] Log: HandleLocalPlayerLoginStatusChanged PlayerName=Epsilon Drxzm PlayerID=Steam|76561198012345678|0 LoginStatus=LS_LoggedIn IsPrimary=True IsInParty=False
+"#;
+    let detected_spaces = rl_config::parse_player_from_log_content(log_sample_spaces).expect("Joueur Steam avec espaces doit être détecté");
+    assert_eq!(detected_spaces.platform, "steam");
+    assert_eq!(detected_spaces.name, "Epsilon Drxzm");
+    assert_eq!(detected_spaces.id, "76561198012345678");
 }
 
 #[test]

@@ -238,8 +238,20 @@ pub fn parse_player_from_log_content(content: &str) -> Option<DetectedPlayer> {
     for line in content.lines().rev() {
         if line.contains("HandleLocalPlayerLoginStatusChanged") {
             if let Some(name_pos) = line.find("PlayerName=") {
-                let rest = &line[name_pos + "PlayerName=".len()..];
-                let name = rest.split_whitespace().next().unwrap_or("").trim().trim_matches('"').trim_matches('\'');
+                let name_start = name_pos + "PlayerName=".len();
+                let name = if let Some(id_pos) = line.find("PlayerID=") {
+                    if id_pos > name_start {
+                        line[name_start..id_pos].trim().trim_matches('"').trim_matches('\'')
+                    } else if let Some(end) = line[name_start..].find(" LoginStatus=") {
+                        line[name_start..name_start + end].trim().trim_matches('"').trim_matches('\'')
+                    } else {
+                        line[name_start..].split_whitespace().next().unwrap_or("").trim().trim_matches('"').trim_matches('\'')
+                    }
+                } else if let Some(end) = line[name_start..].find(" LoginStatus=") {
+                    line[name_start..name_start + end].trim().trim_matches('"').trim_matches('\'')
+                } else {
+                    line[name_start..].split_whitespace().next().unwrap_or("").trim().trim_matches('"').trim_matches('\'')
+                };
                 if let Some(id_pos) = line.find("PlayerID=") {
                     let id_rest = &line[id_pos + "PlayerID=".len()..];
                     let id_token = id_rest.split_whitespace().next().unwrap_or("").trim().trim_matches('"').trim_matches('\'');

@@ -801,7 +801,20 @@ async fn perform_tracker_sync(app: AppHandle) -> Result<Value, String> {
         if plat.is_empty() {
             plat = "epic".to_string();
         }
-        (plat, user, c.store.data.counting.focused_playlist.clone())
+        // Tracker Network identifie les comptes Steam par leur identifiant numérique Steam64 (17 chiffres commençant par 7656)
+        // ou leur URL personnalisée. Les pseudos d'affichage Steam peuvent contenir des espaces et ne sont pas uniques sur TRN.
+        let identifier = if plat == "steam" {
+            if p.detected_id.len() == 17 && p.detected_id.starts_with("7656") && p.detected_id.chars().all(|c| c.is_ascii_digit()) {
+                p.detected_id.clone()
+            } else if p.primary_id.len() == 17 && p.primary_id.starts_with("7656") && p.primary_id.chars().all(|c| c.is_ascii_digit()) {
+                p.primary_id.clone()
+            } else {
+                user
+            }
+        } else {
+            user
+        };
+        (plat, identifier, c.store.data.counting.focused_playlist.clone())
     };
 
     if username.is_empty() {
