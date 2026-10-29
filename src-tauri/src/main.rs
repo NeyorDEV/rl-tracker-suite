@@ -23,7 +23,7 @@ use std::time::Duration;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{
-    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent, Wry,
+    AppHandle, Emitter, LogicalPosition, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder, WindowEvent, Wry,
 };
 use tauri_plugin_dialog::DialogExt;
 
@@ -442,8 +442,16 @@ pub(crate) fn show_overlay_window(
     let msize = monitor.size().to_logical::<f64>(sf);
     let (w, h) = (size.0.max(40.0), size.1.max(20.0));
     let (x, y) = overlay_origin((pos.x, pos.y), (msize.width, msize.height), (w, h), position, offset, custom);
-    let _ = win.set_size(LogicalSize::new(w, h));
-    let _ = win.set_position(LogicalPosition::new(x.round(), y.round()));
+    // D'abord sur le bon écran, puis la taille, en pixels physiques : une fenêtre rangée hors écran
+    // se trouve sur un autre écran, parfois à une échelle d'affichage différente. Le déplacer
+    // change son échelle et Windows redimensionne alors la fenêtre en proportion (150 % -> 100 % :
+    // overlay rogné d'un tiers). La taille doit donc être donnée une fois la fenêtre arrivée.
+    let place = |win: &tauri::WebviewWindow| {
+        let _ = win.set_position(PhysicalPosition::new((x * sf).round() as i32, (y * sf).round() as i32));
+    };
+    place(win);
+    let _ = win.set_size(PhysicalSize::new((w * sf).round() as u32, (h * sf).round() as u32));
+    place(win);
     let _ = win.set_always_on_top(true);
     let _ = win.set_ignore_cursor_events(!interactive);
     true
@@ -1024,22 +1032,19 @@ fn overlay_size(app: AppHandle, w: f64, h: f64) {
     if !(w.is_finite() && h.is_finite()) || w <= 0.0 || h <= 0.0 {
         return;
     }
-    let (changed, final_w, final_h) = {
+    let changed = {
         let ctx = app.state::<Ctx>();
         let mut c = ctx.core.lock().unwrap();
         let (cur_w, cur_h) = c.overlay_size;
-        let w = w.ceil();
-        let h = h.ceil();
-        if (cur_w - w).abs() < 2.0 && (cur_h - h).abs() < 2.0 {
-            (false, cur_w, cur_h)
-        } else {
+        let (w, h) = (w.ceil(), h.ceil());
+        let changed = (cur_w - w).abs() >= 2.0 || (cur_h - h).abs() >= 2.0;
+        if changed {
             c.overlay_size = (w, h);
-            (true, w, h)
         }
+        changed
     };
-    if let Some(win) = app.get_webview_window("overlay") {
-        let _ = win.set_size(LogicalSize::new(final_w, final_h));
-    }
+    // La fenêtre est redimensionnée par `apply_overlay` (qui la place sur le bon écran) : la
+    // redimensionner ici, alors qu'elle est rangée hors écran, donnerait une taille fausse.
     if changed {
         apply_overlay(&app);
     }
