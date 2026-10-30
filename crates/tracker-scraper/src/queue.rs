@@ -153,15 +153,22 @@ impl TrackerQueue {
 
                 let result = fetcher.fetch(&id, FetchOptions { lookup, ..options() }).await;
                 q.finish();
+                // Un profil récupéré est toujours gardé en cache, même si le lobby a été remplacé
+                // entre-temps (MatchCreated puis MatchInitialized) : il évite de redemander le
+                // même joueur à Tracker Network au prochain passage.
+                if let Ok(p) = &result {
+                    let mut p = p.clone();
+                    p.fetched_at = unix_now();
+                    if let Err(e) = cache.put(&p) {
+                        tracing::warn!("écriture du cache impossible : {e}");
+                    }
+                }
                 if q.generation() != gen {
-                    continue; // lobby remplacé pendant la requête
+                    continue; // lobby remplacé pendant la requête : le résultat n'est plus affiché
                 }
                 let outcome = match result {
                     Ok(mut p) => {
                         p.fetched_at = unix_now();
-                        if let Err(e) = cache.put(&p) {
-                            tracing::warn!("écriture du cache impossible : {e}");
-                        }
                         FetchOutcome::Fetched(Box::new(p))
                     }
                     Err(e) => FetchOutcome::Failed { id, error: describe(&e) },
@@ -236,6 +243,36 @@ mod tests {
                 fetched_at: 0,
             })
         }
+    }
+
+    /// Met un moment à répondre : le lobby peut être remplacé pendant la requête.
+    struct Slow;
+    #[async_trait]
+    impl Fetcher for Slow {
+        async fn fetch(&self, id: &PlayerId, o: FetchOptions) -> Result<PlayerProfile, ScrapeError> {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            Fixed.fetch(id, o).await
+        }
+    }
+
+    #[tokio::test]
+    async fn a_profile_fetched_while_the_lobby_is_replaced_is_still_cached() {
+        let cache = Arc::new(Cache::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let q = TrackerQueue::new();
+        let h = q.spawn_worker(Arc::new(Slow), cache.clone(), 3600, Arc::new(FetchOptions::default), Duration::from_millis(1), tx);
+
+        q.enqueue(pid(1), Priority::Opponent);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        q.clear(); // MatchInitialized après MatchCreated : le lobby est remplacé en cours de requête
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(rx.try_recv().is_err(), "le résultat de l'ancien lobby n'est pas affiché");
+        assert!(cache.get_fresh(&pid(1), 3600).unwrap().is_some(), "mais il est gardé : pas de nouvelle requête");
+
+        // Le même joueur revient dans le nouveau lobby : réponse immédiate depuis le cache.
+        q.enqueue(pid(1), Priority::Opponent);
+        assert!(matches!(rx.recv().await.unwrap(), FetchOutcome::Fetched(_)));
+        h.abort();
     }
 
     #[tokio::test]

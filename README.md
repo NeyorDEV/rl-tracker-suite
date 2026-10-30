@@ -169,7 +169,7 @@ What the two tabs share instead of duplicating:
 * The lobby needs the Stats API (`PacketSendRate` above 0). Without it, the Session Stats tab has nothing to count and the LobbyTracker tab shows no players.
 * Epic, Xbox and PSN accounts are looked up on Tracker Network **by name**, so a player whose name is not known yet stays in "loading". Steam accounts are looked up by ID.
 * Tracker Network does not expose account age or demolition statistics, so neither is used.
-* Tracker Network blocks clients that send too many requests (HTTP 429). The app sends one request per lookup, spaces them out, skips anonymous names ("Player 3") and recent failures, and pauses every lookup for 10 minutes if the site answers 429.
+* Tracker Network blocks clients that send too many requests (HTTP 429). The app only calls it when needed: once when the game starts (your MMR), once per player of a lobby (then cached for 24 h), when you click **Synchroniser**, and once after each finished match. Lookups run one at a time, anonymous names ("Player 3") are skipped, and after a 429 the automatic lookups wait a short time (30 s, then 1, 2, 4, 5 min if it keeps happening) while the Synchroniser button always retries immediately.
 * The Tracker Network schema is read tolerantly but is not guaranteed to stay stable.
 * The `RoundStarted` kickoff event follows the Stats API documentation; it was tested against a simulated Stats API, not yet against a full real match.
 

@@ -1,7 +1,7 @@
 {
   "name": "rl-tracker-suite",
   "private": true,
-  "version": "1.4.3",
+  "version": "1.4.4",
   "scripts": {
     "tauri": "tauri",
     "build": "npx @tauri-apps/cli build && node scripts/copy-build.js"

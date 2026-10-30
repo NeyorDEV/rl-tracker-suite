@@ -212,6 +212,21 @@ fn session_via_faux_rocket_league() {
 }
 
 #[test]
+fn fin_de_match_declenche_une_seule_synchronisation() {
+    let mut t = Tracker::new(Session::default());
+    let r = rules();
+    for e in ["MatchCreated", "RoundStarted"] {
+        t.handle(e, &json!({ "MatchGuid": "F1" }), None, &r);
+    }
+    let update = t.handle("UpdateState", &tick("F1", ""), None, &r);
+    assert!(!update.match_finished, "rien à synchroniser en plein match");
+    let end = t.handle("MatchEnded", &json!({ "MatchGuid": "F1", "WinnerTeamNum": 0 }), None, &r);
+    assert!(end.match_finished && end.session_changed);
+    let closed = t.handle("MatchDestroyed", &json!({ "MatchGuid": "F1" }), None, &r);
+    assert!(!closed.match_finished, "pas de seconde synchronisation à la fermeture du match");
+}
+
+#[test]
 fn filtre_ranked() {
     let mut t = Tracker::new(Session::default());
     let r = CountRules { mode: "ranked".into(), ..rules() };
@@ -452,6 +467,7 @@ fn auto_switch_playlist_on_match_tick() {
     let effects = tracker.handle("UpdateState", &d, Some("NAME:epic|Me"), &r);
     assert_eq!(tracker.session.focused_playlist, "1v1");
     assert!(effects.session_changed);
+    assert!(!effects.match_finished, "changer de mode au début d'un match ne déclenche pas de synchronisation");
 
     // Simulation d'un match de 3v3 (PlaylistId = 13)
     let d3 = json!({

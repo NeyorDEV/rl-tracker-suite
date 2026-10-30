@@ -281,6 +281,8 @@ impl CountRules {
 #[derive(Default, Debug)]
 pub struct Effects {
     pub session_changed: bool,
+    /// Un match vient de se terminer et d'être compté (seul moment où le MMR bouge).
+    pub match_finished: bool,
     pub status_changed: bool,
     /// Joueur reconnu via la caméra : (PrimaryId, nom)
     pub detected: Option<(String, String)>,
@@ -614,6 +616,7 @@ impl Tracker {
             delta
         ));
         e.session_changed = true;
+        e.match_finished = true;
     }
 }
 

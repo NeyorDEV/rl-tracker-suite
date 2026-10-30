@@ -342,6 +342,7 @@ fn after_effects(app: &AppHandle, effects: Effects) {
         for line in &effects.logs {
             c.log(line);
         }
+        let mut camera_switched = false;
         if let Some((id, name)) = &effects.detected {
             let p = &c.store.data.player;
             let current_name = if !p.custom_name.trim().is_empty() {
@@ -353,7 +354,7 @@ fn after_effects(app: &AppHandle, effects: Effects) {
             };
             if !name.trim().is_empty() && (current_name.is_empty() || !current_name.eq_ignore_ascii_case(name.trim())) {
                 let plat = c.store.data.player.platform.clone();
-                c.switch_account_if_needed(&plat, name, id);
+                camera_switched = c.switch_account_if_needed(&plat, name, id);
                 c.log(&format!("Profil joueur synchronisé via la caméra de match : {} ({})", name, plat));
             } else if p.detected_id != *id || p.detected_name != *name {
                 c.store.update(json!({ "player": { "detectedId": id, "detectedName": name } }));
@@ -361,16 +362,19 @@ fn after_effects(app: &AppHandle, effects: Effects) {
         }
         if effects.session_changed {
             c.persist_session();
-            let auto_sync = c.store.data.player.auto_sync_mmr;
-            if auto_sync {
-                let app_handle = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    std::thread::sleep(Duration::from_secs(4));
-                    let _ = perform_tracker_sync(app_handle.clone()).await;
-                    std::thread::sleep(Duration::from_secs(6));
-                    let _ = perform_tracker_sync(app_handle).await;
-                });
-            }
+        }
+        // Fin de match : le MMR officiel a bougé. Une seule synchronisation, un peu plus tard pour
+        // laisser à Tracker Network le temps de se mettre à jour. (Pas au changement de mode.)
+        if effects.match_finished && c.store.data.player.auto_sync_mmr {
+            let app_handle = app.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(8)).await;
+                let _ = perform_tracker_sync(app_handle, SyncKind::AfterMatch).await;
+            });
+        }
+        // Compte reconnu par la caméra de match : son vrai MMR remplace la valeur de départ.
+        if camera_switched {
+            tauri::async_runtime::spawn(sync_with_retry(app.clone()));
         }
     }
     if effects.session_changed || effects.status_changed || effects.detected.is_some() {
@@ -692,9 +696,7 @@ async fn detect_player_now(app: AppHandle) -> Value {
         }
         publish(&app);
         let h = app.clone();
-        tauri::async_runtime::spawn(async move {
-            let _ = perform_tracker_sync(h).await;
-        });
+        tauri::async_runtime::spawn(sync_with_retry(h));
         json!({
             "success": true,
             "platform": final_plat,
@@ -804,7 +806,55 @@ pub(crate) fn encode_path_segment(raw: &str) -> String {
         .collect()
 }
 
-async fn perform_tracker_sync(app: AppHandle) -> Result<Value, String> {
+/// Pourquoi une synchronisation du MMR est lancée.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SyncKind {
+    /// Clic sur « Synchroniser » : jamais retardée par la pause après un 429.
+    Manual,
+    /// Lancement du jeu ou changement de compte : réessayée si Tracker Network est occupé.
+    Launch,
+    /// Fin d'un match : ignorée si une synchronisation vient d'avoir lieu.
+    AfterMatch,
+}
+
+/// Heure Unix de la dernière synchronisation réussie.
+static LAST_SYNC_OK: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+/// Après un match, pas de nouvelle synchronisation si la précédente date de moins de ça.
+const AFTER_MATCH_MIN_GAP_SECS: i64 = 45;
+
+/// Synchronisation « au lancement » : si Tracker Network est momentanément indisponible (429,
+/// délai dépassé), on réessaie quelques fois au lieu d'abandonner, pour que le MMR affiché finisse
+/// toujours par être le vrai (sinon un compte neuf reste sur la valeur de départ de 855).
+async fn sync_with_retry(app: AppHandle) {
+    const DELAYS_SECS: [u64; 3] = [30, 60, 120];
+    let mut attempt = 0;
+    loop {
+        let err = match perform_tracker_sync(app.clone(), SyncKind::Launch).await {
+            Ok(_) => return,
+            Err(e) => e,
+        };
+        let retryable = err.contains("429") || err.contains("Délai");
+        match DELAYS_SECS.get(attempt) {
+            Some(delay) if retryable => {
+                app.state::<Ctx>().core.lock().unwrap().log(&format!(
+                    "Synchronisation du MMR impossible pour l'instant, nouvel essai dans {delay} s."
+                ));
+                tokio::time::sleep(Duration::from_secs(*delay)).await;
+                attempt += 1;
+            }
+            _ => {
+                app.state::<Ctx>().core.lock().unwrap().log(&format!("Synchronisation du MMR abandonnée : {err}"));
+                return;
+            }
+        }
+    }
+}
+
+async fn perform_tracker_sync(app: AppHandle, kind: SyncKind) -> Result<Value, String> {
+    let now = now_ms() / 1000;
+    if kind == SyncKind::AfterMatch && now - LAST_SYNC_OK.load(Ordering::SeqCst) < AFTER_MATCH_MIN_GAP_SECS {
+        return Err("Synchronisation déjà faite il y a moins d'une minute.".into());
+    }
     let (platform, username, focus) = {
         let ctx = app.state::<Ctx>();
         let c = ctx.core.lock().unwrap();
@@ -843,10 +893,15 @@ async fn perform_tracker_sync(app: AppHandle) -> Result<Value, String> {
     let encoded_user = encode_path_segment(&username);
 
     let api_url = format!("https://api.tracker.gg/api/v2/rocket-league/standard/profile/{platform}/{encoded_user}");
-    let json = trn_web::fetch_json(&app, &api_url).await?;
+    let json = if kind == SyncKind::Manual {
+        trn_web::fetch_json_manual(&app, &api_url).await?
+    } else {
+        trn_web::fetch_json(&app, &api_url).await?
+    };
     let Some(segments) = json["data"]["segments"].as_array().cloned() else {
         return Err("Profil Tracker Network inattendu : aucune statistique.".into());
     };
+    LAST_SYNC_OK.store(now, Ordering::SeqCst);
 
     let target_playlist = match focus.as_str() {
         "1v1" => "playlist-10",
@@ -950,7 +1005,7 @@ async fn perform_tracker_sync(app: AppHandle) -> Result<Value, String> {
 
 #[tauri::command]
 async fn sync_tracker_mmr(app: AppHandle) -> Result<Value, String> {
-    perform_tracker_sync(app).await
+    perform_tracker_sync(app, SyncKind::Manual).await
 }
 
 #[tauri::command]
@@ -1419,11 +1474,8 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                                         };
                                         lobby::on_local_player(&h_inner, &final_plat, &player.id, &player.name);
                                         publish(&h_inner);
-                                        let auto_sync = h_inner.state::<Ctx>().core.lock().unwrap().store.data.player.auto_sync_mmr;
-                                        if auto_sync {
-                                            std::thread::sleep(Duration::from_millis(1000));
-                                            let _ = perform_tracker_sync(h_inner.clone()).await;
-                                        }
+                                        // Une fois par lancement du jeu : le vrai MMR du compte détecté.
+                                        sync_with_retry(h_inner.clone()).await;
                                         let _ = switched;
                                         break;
                                     }
@@ -1471,23 +1523,6 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 thread::sleep(Duration::from_millis(250));
-            }
-        });
-    }
-
-    // Synchronisation automatique du MMR au lancement si un joueur est déjà configuré
-    {
-        let app = handle.clone();
-        tauri::async_runtime::spawn(async move {
-            thread::sleep(Duration::from_secs(2));
-            let has_user = {
-                let ctx = app.state::<Ctx>();
-                let c = ctx.core.lock().unwrap();
-                let p = &c.store.data.player;
-                !p.custom_name.trim().is_empty() || !p.primary_id.trim().is_empty() || !p.detected_name.trim().is_empty()
-            };
-            if has_user {
-                let _ = perform_tracker_sync(app).await;
             }
         });
     }

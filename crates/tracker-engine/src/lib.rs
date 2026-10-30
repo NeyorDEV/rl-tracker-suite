@@ -28,7 +28,7 @@ use tracker_scraper::{
 /// Un joueur dont la recherche vient d'échouer n'est pas redemandé pendant ce délai.
 const FAILURE_MEMORY_SECS: i64 = 600;
 /// Délai minimum entre deux recherches de profil.
-const LOOKUP_INTERVAL: Duration = Duration::from_millis(3000);
+const LOOKUP_INTERVAL: Duration = Duration::from_millis(2000);
 
 /// Pseudo masqué par le mode anonyme du jeu (« Player 3 ») : inutile de le chercher.
 fn is_anonymous_name(name: &str) -> bool {
@@ -350,8 +350,10 @@ impl Inner {
                 }
                 tracker_scraper::FetchOutcome::Failed { id, error } => {
                     tracing::info!("profil {id} indisponible : {error}");
-                    // Un blocage général (429) n'est pas la faute du joueur : on le réessaiera.
-                    if !error.contains("429") {
+                    // Seul un profil réellement introuvable ou privé est mis de côté. Un blocage (429),
+                    // un délai dépassé ou une erreur réseau ne sont pas la faute du joueur : on le
+                    // redemandera au prochain match au lieu de l'afficher « indisponible » pour rien.
+                    if error.contains("introuvable") {
                         self.failures.lock().unwrap().insert(id.clone(), unix_now());
                     }
                     lobby.set_failed(&id);
@@ -486,11 +488,14 @@ mod tests {
         let e = engine(Config::default());
         e.inner.apply_outcome(tracker_scraper::FetchOutcome::Failed { id: id(1), error: "profil introuvable".into() });
         e.inner.apply_outcome(tracker_scraper::FetchOutcome::Failed { id: id(2), error: "HTTP 429".into() });
+        e.inner.apply_outcome(tracker_scraper::FetchOutcome::Failed { id: id(3), error: "Délai dépassé".into() });
         e.inner.lobby.lock().unwrap().reset();
         e.inject_player(id(1), Some("Gone".into()), None);
         e.inject_player(id(2), Some("Busy".into()), None);
-        assert_eq!(e.inner.queue.pending(), 1, "seul le joueur bloqué par le 429 est redemandé");
+        e.inject_player(id(3), Some("Slow".into()), None);
+        assert_eq!(e.inner.queue.pending(), 2, "un blocage ou un délai dépassé ne condamne pas le joueur");
         assert_eq!(e.inner.queue.pop_next(), Some(id(2)));
+        assert_eq!(e.inner.queue.pop_next(), Some(id(3)));
     }
 
     #[test]

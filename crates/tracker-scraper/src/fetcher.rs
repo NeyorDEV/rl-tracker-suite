@@ -92,17 +92,21 @@ impl HybridFetcher {
 #[async_trait]
 impl Fetcher for HybridFetcher {
     async fn fetch(&self, id: &PlayerId, opts: FetchOptions) -> Result<PlayerProfile, ScrapeError> {
-        let mut last = ScrapeError::NoSource;
+        // On garde l'erreur la plus parlante : la vraie raison de la première source (429, profil
+        // introuvable, délai dépassé…), pas « aucune source » de la source de repli sans jeton.
+        let mut reason = ScrapeError::NoSource;
         for f in &self.fetchers {
             match f.fetch(id, opts.clone()).await {
                 Ok(p) => return Ok(p),
                 Err(e) => {
                     tracing::debug!("source en échec pour {id} : {e}");
-                    last = e;
+                    if matches!(reason, ScrapeError::NoSource) {
+                        reason = e;
+                    }
                 }
             }
         }
-        Err(last)
+        Err(reason)
     }
 }
 
@@ -186,6 +190,8 @@ mod tests {
                     fetched_at: 0,
                 }),
                 Err(ScrapeError::Blocked) => Err(ScrapeError::Blocked),
+                Err(ScrapeError::RateLimited) => Err(ScrapeError::RateLimited),
+                Err(ScrapeError::NoSource) => Err(ScrapeError::NoSource),
                 Err(_) => Err(ScrapeError::NotFound),
             }
         }
@@ -208,10 +214,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hybrid_reports_last_error_and_empty_means_no_source() {
+    async fn hybrid_reports_the_real_reason_and_empty_means_no_source() {
         let id = PlayerId::new(Platform::Steam, "76561198012345678");
         let h = HybridFetcher::new(vec![Arc::new(Stub(Err(ScrapeError::Blocked)))]);
         assert!(matches!(h.fetch(&id, FetchOptions::default()).await, Err(ScrapeError::Blocked)));
+        // La source de repli sans jeton ne doit pas masquer la vraie raison de la première.
+        let h = HybridFetcher::new(vec![
+            Arc::new(Stub(Err(ScrapeError::RateLimited))),
+            Arc::new(Stub(Err(ScrapeError::NoSource))),
+        ]);
+        assert!(matches!(h.fetch(&id, FetchOptions::default()).await, Err(ScrapeError::RateLimited)));
         let empty = HybridFetcher::new(vec![]);
         assert!(matches!(empty.fetch(&id, FetchOptions::default()).await, Err(ScrapeError::NoSource)));
     }
