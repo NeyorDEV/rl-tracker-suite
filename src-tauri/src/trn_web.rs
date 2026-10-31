@@ -23,7 +23,7 @@ const OFFSCREEN: f64 = -32000.0;
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 const MAX_TICKS: u32 = 50;
 /// Délai minimum entre la fin d'une recherche et le début de la suivante.
-const MIN_GAP: Duration = Duration::from_millis(2000);
+const MIN_GAP: Duration = Duration::from_millis(1000);
 /// Pause des recherches automatiques après la première réponse 429 (doublée à chaque nouvelle).
 const FIRST_PAUSE_SECS: i64 = 30;
 const MAX_PAUSE_SECS: i64 = 300;
@@ -84,18 +84,40 @@ pub fn urlencoding_decode(input: &str) -> String {
 /// Script exécuté dans la fenêtre masquée, qui affiche directement le JSON de l'API : il attend
 /// que le défi Cloudflare soit passé, lit le texte de la page (aucune requête supplémentaire) et
 /// écrit le résultat dans le fragment de l'URL (`#TRN_SUCCESS=…` ou `#TRN_ERROR=…`).
+/// `__EXTRA__` est remplacé par l'adresse d'une seconde ressource de la même API (l'historique
+/// des sessions) ou par `null`. Elle est lue depuis la même page, donc sans nouvelle fenêtre ni
+/// nouveau défi Cloudflare : un profil de lobby coûte une seule fenêtre au lieu de deux.
 const INIT_SCRIPT: &str = r#"
 (function() {
   if (window.top !== window || window.__rltsArmed) return;
   window.__rltsArmed = true;
 
+  const EXTRA = __EXTRA__;
   let finished = false;
+  let fetchingExtra = false;
   let timer = null;
   function report(success, data) {
     if (finished) return;
     finished = true;
     clearInterval(timer);
     window.location.hash = (success ? 'TRN_SUCCESS=' : 'TRN_ERROR=') + encodeURIComponent(JSON.stringify(data));
+  }
+
+  // Ne garde de l'historique que ce que l'application lit (résultat, mode, MMR) : le résultat
+  // voyage dans l'adresse de la page, autant qu'il reste petit.
+  function slimSessions(x) {
+    try {
+      const items = (x && x.data && x.data.items) || [];
+      const val = o => (o && o.value !== undefined ? { value: o.value } : undefined);
+      return { data: { items: items.slice(0, 12).map(it => ({ matches: (it.matches || []).map(m => ({
+        metadata: { result: m.metadata && m.metadata.result, playlist: m.metadata && m.metadata.playlist },
+        stats: {
+          matchesPlayed: val(m.stats && m.stats.matchesPlayed),
+          wins: val(m.stats && m.stats.wins),
+          rating: { metadata: { ratingDelta: m.stats && m.stats.rating && m.stats.rating.metadata && m.stats.rating.metadata.ratingDelta } }
+        }
+      })) })) } };
+    } catch (e) { return null; }
   }
 
   // Code HTTP réel de la page (0 si le navigateur ne le donne pas).
@@ -114,7 +136,17 @@ const INIT_SCRIPT: &str = r#"
       if (txt.charAt(0) === '{') {
         let json = null;
         try { json = JSON.parse(txt); } catch (e) { return; }
-        if (json.data) return report(true, json);
+        if (json.data) {
+          if (!EXTRA) return report(true, json);
+          if (fetchingExtra) return;
+          fetchingExtra = true;
+          // Même origine que la page : le cookie Cloudflare est envoyé, aucun blocage CORS.
+          fetch(EXTRA, { credentials: 'include', cache: 'no-store', headers: { 'Accept': 'application/json' } })
+            .then(r => (r.ok ? r.json() : null))
+            .catch(() => null)
+            .then(extra => { json.__extra = slimSessions(extra); report(true, json); });
+          return;
+        }
         const errors = JSON.stringify(json.errors || json).toLowerCase();
         if (status === 404 || errors.includes('notfound') || errors.includes('not found')) return report(false, 'Profil introuvable sur Rocket League Tracker');
         if (status >= 400 && status !== 403) return report(false, 'HTTP ' + status);
@@ -131,12 +163,24 @@ const INIT_SCRIPT: &str = r#"
 
 /// Recherche automatique (lobby, synchronisation en arrière-plan) : respecte la pause après un 429.
 pub async fn fetch_json(app: &AppHandle, api_url: &str) -> Result<Value, String> {
-    fetch(app, api_url, true).await
+    fetch(app, api_url, None, true).await.map(|(main, _)| main)
 }
 
 /// Recherche demandée par l'utilisateur (bouton) : ne reste jamais bloquée par la pause.
 pub async fn fetch_json_manual(app: &AppHandle, api_url: &str) -> Result<Value, String> {
-    fetch(app, api_url, false).await
+    fetch(app, api_url, None, false).await.map(|(main, _)| main)
+}
+
+/// Deux ressources de l'API en une seule fenêtre : `api_url`, puis `extra_url` (meilleur effort :
+/// `None` si elle échoue sans que la première en souffre).
+pub async fn fetch_json_pair(app: &AppHandle, api_url: &str, extra_url: &str) -> Result<(Value, Option<Value>), String> {
+    fetch(app, api_url, Some(extra_url), true).await
+}
+
+/// Script de la fenêtre avec l'adresse de la ressource supplémentaire (ou `null`).
+fn init_script(extra_url: Option<&str>) -> String {
+    let extra = extra_url.map_or_else(|| "null".to_string(), |u| serde_json::to_string(u).unwrap_or_else(|_| "null".into()));
+    INIT_SCRIPT.replace("__EXTRA__", &extra)
 }
 
 /// Ligne du journal : la raison exacte, sans l'adresse complète.
@@ -147,7 +191,12 @@ fn log_failure(app: &AppHandle, api_url: &str, reason: &str) {
     }
 }
 
-async fn fetch(app: &AppHandle, api_url: &str, honor_pause: bool) -> Result<Value, String> {
+async fn fetch(
+    app: &AppHandle,
+    api_url: &str,
+    extra_url: Option<&str>,
+    honor_pause: bool,
+) -> Result<(Value, Option<Value>), String> {
     let parsed = api_url.parse::<tauri::Url>().map_err(|e| format!("URL invalide : {e}"))?;
 
     let _one_at_a_time = SERIAL.lock().await;
@@ -167,6 +216,7 @@ async fn fetch(app: &AppHandle, api_url: &str, honor_pause: bool) -> Result<Valu
 
     let label = format!("tracker_sync_{}", WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed));
     let task_app = app.clone();
+    let script = init_script(extra_url);
     // Le sondage dort entre deux lectures : hors du thread de l'exécuteur asynchrone.
     let result = tauri::async_runtime::spawn_blocking(move || {
         let win = WebviewWindowBuilder::new(&task_app, &label, WebviewUrl::External(parsed))
@@ -180,7 +230,7 @@ async fn fetch(app: &AppHandle, api_url: &str, honor_pause: bool) -> Result<Valu
             .resizable(true)
             .focused(false)
             .visible(false)
-            .initialization_script(INIT_SCRIPT)
+            .initialization_script(&script)
             .build()
             .map_err(|e| format!("Impossible d'ouvrir le navigateur en arrière-plan : {e}"))?;
         let _ = win.hide();
@@ -212,10 +262,11 @@ async fn fetch(app: &AppHandle, api_url: &str, honor_pause: bool) -> Result<Valu
         *last = Some(Instant::now());
     }
     match result {
-        Ok(v) => {
+        Ok(mut v) => {
             STRIKES.store(0, Ordering::SeqCst);
             PAUSED_UNTIL.store(0, Ordering::SeqCst);
-            Ok(v)
+            let extra = v.as_object_mut().and_then(|o| o.remove("__extra")).filter(|x| !x.is_null());
+            Ok((v, extra))
         }
         Err(e) if e.contains("HTTP 429") => {
             let strikes = STRIKES.fetch_add(1, Ordering::SeqCst) + 1;
@@ -265,7 +316,11 @@ mod tests {
     #[test]
     fn script_never_loops_on_the_api() {
         // Aucune requête réseau dans le script : il lit uniquement la page déjà affichée.
-        assert!(!INIT_SCRIPT.contains("fetch("));
+        // La seule requête du script est celle de l'historique, vers la même origine, et une fois.
+        assert_eq!(INIT_SCRIPT.matches("fetch(").count(), 1);
+        assert!(init_script(None).contains("const EXTRA = null;"));
+        let with = init_script(Some("https://api.tracker.gg/x?a=1&b=\"2\""));
+        assert!(with.contains(r#"const EXTRA = "https://api.tracker.gg/x?a=1&b=\"2\"";"#));
         assert!(INIT_SCRIPT.contains("window.top !== window"));
     }
 }

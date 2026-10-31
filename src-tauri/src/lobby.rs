@@ -9,7 +9,7 @@ use crate::{drag_window_by, park_overlay_window, show_overlay_window, window_pos
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
@@ -23,20 +23,27 @@ const PREVIEW_DURATION: Duration = Duration::from_secs(30);
 /// Interroge Tracker Network avec la WebView masquée de l'application.
 struct AppWebFetch(AppHandle);
 
+/// Traduit l'erreur de la WebView en erreur de recherche.
+fn to_scrape_error(e: String) -> ScrapeError {
+    if e.contains("introuvable") {
+        ScrapeError::NotFound
+    } else if e.contains("429") {
+        ScrapeError::RateLimited
+    } else if e.contains("Délai") {
+        ScrapeError::Timeout
+    } else {
+        ScrapeError::Webview(e)
+    }
+}
+
 #[async_trait]
 impl WebFetch for AppWebFetch {
     async fn get_json(&self, api_url: &str) -> Result<Value, ScrapeError> {
-        crate::trn_web::fetch_json(&self.0, api_url).await.map_err(|e| {
-            if e.contains("introuvable") {
-                ScrapeError::NotFound
-            } else if e.contains("429") {
-                ScrapeError::RateLimited
-            } else if e.contains("Délai") {
-                ScrapeError::Timeout
-            } else {
-                ScrapeError::Webview(e)
-            }
-        })
+        crate::trn_web::fetch_json(&self.0, api_url).await.map_err(to_scrape_error)
+    }
+
+    async fn get_json_pair(&self, api_url: &str, extra_url: &str) -> Result<(Value, Option<Value>), ScrapeError> {
+        crate::trn_web::fetch_json_pair(&self.0, api_url, extra_url).await.map_err(to_scrape_error)
     }
 }
 
@@ -46,6 +53,8 @@ pub struct LobbyState {
     visible: AtomicBool,
     /// Vrai tant que le lobby contient au moins un joueur.
     has_players: AtomicBool,
+    /// Nombre de joueurs dont le profil se charge encore.
+    pending: AtomicUsize,
     preview: AtomicBool,
     preview_generation: AtomicU64,
     size: Mutex<(f64, f64)>,
@@ -73,6 +82,7 @@ pub fn start(app: &AppHandle, engine: Arc<Engine>) {
         engine: engine.clone(),
         visible: AtomicBool::new(false),
         has_players: AtomicBool::new(false),
+        pending: AtomicUsize::new(0),
         preview: AtomicBool::new(false),
         preview_generation: AtomicU64::new(0),
         size: Mutex::new((380.0, 200.0)),
@@ -93,6 +103,7 @@ pub fn start(app: &AppHandle, engine: Arc<Engine>) {
                 Ok(snap) => {
                     let has_players = !snap.players.is_empty();
                     lobby(&handle).has_players.store(has_players, Ordering::Relaxed);
+                    lobby(&handle).pending.store(snap.pending, Ordering::Relaxed);
                     if has_players && !had_players {
                         on_new_lobby(&handle);
                     }
@@ -159,11 +170,41 @@ fn on_new_lobby(app: &AppHandle) {
     let delay = Duration::from_secs(u64::from(cfg.auto_hide_seconds.clamp(5, 600)));
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(delay).await;
-        let st = lobby(&app);
-        if st.autohide_generation.load(Ordering::SeqCst) == generation && !st.preview.load(Ordering::Relaxed) {
-            st.hidden_by_autohide.store(true, Ordering::Relaxed);
+        // Le délai écoulé, l'overlay attend la fin du chargement des profils (plafonné) puis
+        // laisse quelques secondes pour les lire, au lieu de disparaître avec un joueur en cours.
+        let (mut loading_secs, mut read_secs) = (0u64, 0u64);
+        loop {
+            let st = lobby(&app);
+            if st.autohide_generation.load(Ordering::SeqCst) != generation || st.preview.load(Ordering::Relaxed) {
+                return;
+            }
+            let pending = st.pending.load(Ordering::Relaxed);
+            if should_hide(pending, loading_secs, read_secs) {
+                st.hidden_by_autohide.store(true, Ordering::Relaxed);
+                return;
+            }
+            if pending > 0 {
+                loading_secs += 1;
+            } else {
+                read_secs += 1;
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     });
+}
+
+/// Attente maximale, après le délai choisi, d'un profil qui se charge encore.
+const MAX_LOADING_WAIT_SECS: u64 = 30;
+/// Temps de lecture laissé quand le dernier profil vient d'arriver après le délai.
+const READ_TIME_SECS: u64 = 5;
+
+/// L'overlay se masque-t-il maintenant ? `loading_secs` : secondes d'attente de profils après le
+/// délai ; `read_secs` : secondes écoulées depuis que tout est chargé.
+fn should_hide(pending: usize, loading_secs: u64, read_secs: u64) -> bool {
+    if loading_secs >= MAX_LOADING_WAIT_SECS {
+        return true;
+    }
+    pending == 0 && (loading_secs == 0 || read_secs >= READ_TIME_SECS)
 }
 
 /// Coup d'envoi (fin du décompte) : masque l'overlay tout de suite, une seule fois par lobby.
@@ -328,4 +369,23 @@ pub fn lt_drag_finish(app: AppHandle) {
     cfg.overlay_custom_x = Some(x);
     cfg.overlay_custom_y = Some(y);
     apply_config(&app, cfg);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn overlay_waits_for_profiles_still_loading() {
+        // Tout est chargé quand le délai se termine : on masque tout de suite.
+        assert!(should_hide(0, 0, 0));
+        // Un joueur charge encore : on attend.
+        assert!(!should_hide(1, 0, 0));
+        assert!(!should_hide(1, 12, 0));
+        // Dernier profil arrivé après le délai : quelques secondes de lecture, puis on masque.
+        assert!(!should_hide(0, 8, 0) && !should_hide(0, 8, 4));
+        assert!(should_hide(0, 8, 5));
+        // Un joueur qui ne charge jamais ne retient pas l'overlay indéfiniment.
+        assert!(should_hide(1, MAX_LOADING_WAIT_SECS, 0));
+    }
 }

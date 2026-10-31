@@ -27,8 +27,9 @@ use tracker_scraper::{
 
 /// Un joueur dont la recherche vient d'échouer n'est pas redemandé pendant ce délai.
 const FAILURE_MEMORY_SECS: i64 = 600;
-/// Délai minimum entre deux recherches de profil.
-const LOOKUP_INTERVAL: Duration = Duration::from_millis(2000);
+/// Délai minimum entre deux recherches de profil. L'espacement vis-à-vis de Tracker Network est
+/// déjà assuré par l'application (une recherche à la fois, 1 s entre deux) : pas de pause en plus.
+const LOOKUP_INTERVAL: Duration = Duration::from_millis(0);
 
 /// Pseudo masqué par le mode anonyme du jeu (« Player 3 ») : inutile de le chercher.
 fn is_anonymous_name(name: &str) -> bool {

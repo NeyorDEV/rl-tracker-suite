@@ -19,6 +19,10 @@ const API_BASE: &str = "https://api.tracker.gg/api/v2/rocket-league/standard/pro
 #[async_trait]
 pub trait WebFetch: Send + Sync {
     async fn get_json(&self, api_url: &str) -> Result<Value, ScrapeError>;
+
+    /// Deux ressources de l'API dans une seule fenêtre (profil + historique des sessions) : la
+    /// seconde est un meilleur effort.
+    async fn get_json_pair(&self, api_url: &str, extra_url: &str) -> Result<(Value, Option<Value>), ScrapeError>;
 }
 
 pub struct WebSource {
@@ -48,6 +52,10 @@ impl JsonSource for WebSource {
     async fn get_json(&self, url: &str) -> Result<Value, ScrapeError> {
         self.fetch.get_json(url).await
     }
+
+    async fn get_json_pair(&self, url: &str, extra_url: &str) -> Result<(Value, Option<Value>), ScrapeError> {
+        self.fetch.get_json_pair(url, extra_url).await
+    }
 }
 
 #[cfg(test)]
@@ -65,6 +73,11 @@ mod tests {
             self.0.lock().unwrap().push(api_url.into());
             Ok(json!({"data": {"segments": []}}))
         }
+
+        async fn get_json_pair(&self, api_url: &str, extra_url: &str) -> Result<(Value, Option<Value>), ScrapeError> {
+            self.0.lock().unwrap().push(format!("{api_url} + {extra_url}"));
+            Ok((json!({"data": {"segments": []}}), Some(json!({"data": {"items": []}}))))
+        }
     }
 
     #[tokio::test]
@@ -73,11 +86,18 @@ mod tests {
         let src = WebSource::new(fake.clone());
         let id = PlayerId::new(Platform::Epic, "6897812333f244858dddff1fbb06554f");
         let profile = src.profile_url(&id, "neyor.");
+        let sessions = src.sessions_url(&id, "neyor.");
         assert!(src.get_json(&profile).await.unwrap().get("data").is_some());
-        src.get_json(&src.sessions_url(&id, "neyor.")).await.unwrap();
-        let calls = fake.0.lock().unwrap();
-        assert_eq!(calls.len(), 2, "une requête par appel, aucune relance");
-        assert_eq!(calls[0], "https://api.tracker.gg/api/v2/rocket-league/standard/profile/epic/neyor.");
-        assert!(calls[1].ends_with("/neyor./sessions"));
+        src.get_json(&sessions).await.unwrap();
+        {
+            let calls = fake.0.lock().unwrap();
+            assert_eq!(calls.len(), 2, "une requête par appel, aucune relance");
+            assert_eq!(calls[0], "https://api.tracker.gg/api/v2/rocket-league/standard/profile/epic/neyor.");
+            assert!(calls[1].ends_with("/neyor./sessions"));
+        }
+        // Profil + historique : un seul appel à l'application, donc une seule fenêtre.
+        let (main, extra) = src.get_json_pair(&profile, &sessions).await.unwrap();
+        assert!(main.get("data").is_some() && extra.is_some());
+        assert_eq!(fake.0.lock().unwrap().len(), 3);
     }
 }
