@@ -1431,7 +1431,9 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                             lobby::on_game_launched(&h);
                             // Détection automatique de la plateforme d'où Rocket League a été lancé (style BakkesMod)
                             let mut detected_platform = None;
+                            let mut game_started_at = None;
                             if let Some(info) = rl_config::get_running_rocket_league_info() {
+                                game_started_at = info.started_at_unix;
                                 let plat_str = info.platform.clone();
                                 let target_dir = info.install_dir.clone();
                                 {
@@ -1457,10 +1459,12 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                             // Rocket League écrit Launch.log progressivement (command line au début, EOS/PsyNet après ~10s).
                             let h_inner = h.clone();
                             tauri::async_runtime::spawn(async move {
-                                for _attempt in 0..10 {
+                                // Jusqu'à une minute : le compte Steam n'apparaît dans le journal qu'une vingtaine
+                                // de secondes après le démarrage. Seul le journal de CE lancement compte.
+                                for _attempt in 0..40 {
                                     std::thread::sleep(Duration::from_millis(1500));
                                     let docs = h_inner.state::<Ctx>().core.lock().unwrap().documents_dir.clone();
-                                    if let Some(player) = rl_config::detect_player_from_logs(docs.as_deref()) {
+                                    if let Some(player) = rl_config::detect_player_from_logs_since(docs.as_deref(), game_started_at) {
                                         let final_plat = detected_platform.clone().unwrap_or(player.platform);
                                         let switched = {
                                             let ctx = h_inner.state::<Ctx>();

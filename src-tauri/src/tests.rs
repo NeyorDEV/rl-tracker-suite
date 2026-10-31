@@ -320,6 +320,43 @@ fn pseudo_encode_pour_une_url() {
 }
 
 #[test]
+fn compte_detecte_dans_le_journal_du_lancement_en_cours() {
+    use std::time::{Duration as D, SystemTime};
+    let dir = std::env::temp_dir().join(format!("rlts-logs-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let line = |name: &str, id: &str| {
+        format!("[0021.24] Party: HandleLocalPlayerLoginStatusChanged PlayerName={name} PlayerID=Epic|{id}|0 LoginStatus=LS_LoggedIn IsPrimary=True IsInParty=False\n")
+    };
+    let old = dir.join("old.log"); // session précédente : compte neyorbb
+    let new = dir.join("new.log"); // lancement en cours : compte neyor.
+    std::fs::write(&old, line("neyorbb", "5ed13d49251549efbf82f4d7e86dde11")).unwrap();
+    std::fs::write(&new, "[0000.00] Log: Command line: -epicusername=neyor. -epicuserid=6897812333f244858dddff1fbb06554f\n").unwrap();
+    let yesterday = SystemTime::now() - D::from_secs(20 * 3600);
+    std::fs::OpenOptions::new().write(true).open(&old).unwrap().set_modified(yesterday).unwrap();
+    let started = (SystemTime::now() - D::from_secs(8)).duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as i64;
+
+    // Juste après le lancement, l'ancien journal est encore en tête : il ne doit pas être lu.
+    let paths = vec![old.clone(), new.clone()];
+    let p = crate::rl_config::pick_player(&paths, Some(started)).unwrap();
+    assert_eq!(p.name, "neyor.", "le compte du lancement en cours, pas celui de la session précédente");
+    assert!(crate::rl_config::pick_player(&[old.clone()], Some(started)).is_none(), "attendre le nouveau journal");
+    // Sans heure de démarrage (jeu lancé avant l'application) : comportement inchangé.
+    assert_eq!(crate::rl_config::pick_player(&[old], None).unwrap().name, "neyorbb");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn heure_de_demarrage_du_jeu_est_plausible_quand_il_tourne() {
+    // Sans Rocket League lancé, il n'y a rien à vérifier.
+    let Some(info) = crate::rl_config::get_running_rocket_league_info() else { return };
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+    let started = info.started_at_unix.expect("heure de démarrage du processus");
+    eprintln!("RocketLeague.exe démarré à l'heure Unix {started} (il y a {} s)", now - started);
+    assert!(started <= now && now - started < 30 * 24 * 3600);
+}
+
+#[test]
 fn serveur_obs() {
     let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
     let web = WebServer::start(

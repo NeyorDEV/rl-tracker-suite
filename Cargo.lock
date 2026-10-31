@@ -3078,7 +3078,7 @@ dependencies = [
 
 [[package]]
 name = "rl-tracker-suite"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "async-trait",
  "serde",
@@ -4367,7 +4367,7 @@ dependencies = [
 
 [[package]]
 name = "tracker-cache"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "rusqlite",
  "thiserror 2.0.21",
@@ -4376,7 +4376,7 @@ dependencies = [
 
 [[package]]
 name = "tracker-core"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "serde",
  "serde_json",
@@ -4384,7 +4384,7 @@ dependencies = [
 
 [[package]]
 name = "tracker-engine"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "async-trait",
  "serde_json",
@@ -4400,14 +4400,14 @@ dependencies = [
 
 [[package]]
 name = "tracker-heuristics"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "tracker-core",
 ]
 
 [[package]]
 name = "tracker-parser"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "serde_json",
  "tracker-core",
@@ -4415,7 +4415,7 @@ dependencies = [
 
 [[package]]
 name = "tracker-scraper"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "async-trait",
  "reqwest 0.12.28",

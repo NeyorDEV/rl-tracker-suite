@@ -26,6 +26,9 @@ pub struct DetectedInstalls {
 #[serde(rename_all = "camelCase")]
 pub struct RunningGameInfo {
     pub pid: u32,
+    /// Heure Unix de démarrage du processus : un `Launch.log` plus ancien est celui d'une
+    /// session précédente (et d'un autre compte, peut-être).
+    pub started_at_unix: Option<i64>,
     pub exe_path: String,
     pub install_dir: Option<String>,
     pub platform: String,
@@ -302,9 +305,32 @@ pub fn parse_player_from_log_content(content: &str) -> Option<DetectedPlayer> {
 }
 
 pub fn detect_player_from_logs(documents_dir: Option<&Path>) -> Option<DetectedPlayer> {
-    let paths = find_launch_log_paths(documents_dir);
+    detect_player_from_logs_since(documents_dir, None)
+}
+
+/// Comme `detect_player_from_logs`, mais ignore les journaux plus anciens que `since_unix`
+/// (démarrage du jeu) : juste après le lancement, l'ancien `Launch.log` est encore là quelques
+/// secondes avant d'être renommé en sauvegarde, et c'est le compte de la session précédente.
+pub fn detect_player_from_logs_since(documents_dir: Option<&Path>, since_unix: Option<i64>) -> Option<DetectedPlayer> {
+    pick_player(&find_launch_log_paths(documents_dir), since_unix)
+}
+
+/// Marge acceptée entre le démarrage du processus et la création du journal.
+const LOG_START_SLACK_SECS: i64 = 5;
+
+pub(crate) fn pick_player(paths: &[PathBuf], since_unix: Option<i64>) -> Option<DetectedPlayer> {
     for path in paths {
-        if let Some(content) = read_file_shared(&path) {
+        if let Some(since) = since_unix {
+            let modified = fs::metadata(path)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64);
+            if modified.is_some_and(|m| m < since - LOG_START_SLACK_SECS) {
+                continue; // journal d'une session précédente
+            }
+        }
+        if let Some(content) = read_file_shared(path) {
             if let Some(player) = parse_player_from_log_content(&content) {
                 return Some(player);
             }
@@ -594,6 +620,13 @@ pub fn get_running_rocket_league_info() -> Option<RunningGameInfo> {
         fn Process32NextW(h_snapshot: *mut std::ffi::c_void, lppe: *mut PROCESSENTRY32W) -> i32;
         fn OpenProcess(dw_desired_access: u32, b_inherit_handle: i32, dw_process_id: u32) -> *mut std::ffi::c_void;
         fn QueryFullProcessImageNameW(h_process: *mut std::ffi::c_void, dw_flags: u32, lp_exe_name: *mut u16, lpdw_size: *mut u32) -> i32;
+        fn GetProcessTimes(
+            h_process: *mut std::ffi::c_void,
+            creation: *mut [u32; 2],
+            exit: *mut [u32; 2],
+            kernel: *mut [u32; 2],
+            user: *mut [u32; 2],
+        ) -> i32;
         fn CloseHandle(h_object: *mut std::ffi::c_void) -> i32;
     }
 
@@ -631,6 +664,10 @@ pub fn get_running_rocket_league_info() -> Option<RunningGameInfo> {
         let mut path_buf = [0u16; 1024];
         let mut size = path_buf.len() as u32;
         let success = QueryFullProcessImageNameW(handle, 0, path_buf.as_mut_ptr(), &mut size);
+        // Heure de démarrage : FILETIME (centaines de ns depuis 1601) -> secondes Unix.
+        let (mut created, mut ignored) = ([0u32; 2], [[0u32; 2]; 3]);
+        let started_at_unix = (GetProcessTimes(handle, &mut created, &mut ignored[0], &mut ignored[1], &mut ignored[2]) != 0)
+            .then(|| (((u64::from(created[1])) << 32 | u64::from(created[0])) / 10_000_000) as i64 - 11_644_473_600);
         CloseHandle(handle);
 
         if success != 0 && size > 0 {
@@ -650,6 +687,7 @@ pub fn get_running_rocket_league_info() -> Option<RunningGameInfo> {
 
             return Some(RunningGameInfo {
                 pid,
+                started_at_unix,
                 exe_path: full_exe_path,
                 install_dir,
                 platform,
