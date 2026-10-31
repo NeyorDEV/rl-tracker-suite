@@ -211,6 +211,97 @@ fn session_via_faux_rocket_league() {
     let (_again, _) = listener.accept().unwrap();
 }
 
+/// État de jeu à un instant donné : score (bleu, orange), secondes restantes, prolongation.
+fn etat(guid: &str, blue: i64, orange: i64, seconds: i64, overtime: bool) -> Value {
+    let mut v = tick(guid, "");
+    v["Game"]["Teams"] = json!([
+        { "Name": "Blue", "TeamNum": 0, "Score": blue },
+        { "Name": "Orange", "TeamNum": 1, "Score": orange }
+    ]);
+    v["Game"]["TimeSeconds"] = json!(seconds);
+    v["Game"]["bOvertime"] = json!(overtime);
+    v
+}
+
+fn demarre(t: &mut Tracker, guid: &str, r: &CountRules) {
+    for e in ["MatchCreated", "RoundStarted"] {
+        t.handle(e, &json!({ "MatchGuid": guid }), None, r);
+    }
+}
+
+#[test]
+fn quitter_pendant_le_podium_apres_une_victoire_reste_une_victoire() {
+    let r = rules();
+    let mut t = Tracker::new(Session::default());
+    demarre(&mut t, "V1", &r);
+    t.handle("UpdateState", &etat("V1", 3, 1, 120, false), Some("NAME:epic|Dirayor"), &r);
+    // Fin du temps réglementaire, 3-1 : le joueur (équipe bleue) quitte pendant le podium,
+    // avant tout événement MatchEnded.
+    t.handle("UpdateState", &etat("V1", 3, 1, 0, false), Some("NAME:epic|Dirayor"), &r);
+    let e = t.handle("MatchDestroyed", &json!({ "MatchGuid": "V1" }), None, &r);
+    assert!(e.match_finished);
+    assert_eq!((t.session.wins, t.session.losses), (1, 0), "une victoire, pas un abandon");
+    assert!(!t.session.recent[0].abandoned && t.session.recent[0].won);
+    assert_eq!(t.session.last_match_mmr_change, 9.0);
+}
+
+#[test]
+fn quitter_apres_une_defaite_au_score_reste_une_defaite_sans_abandon() {
+    let r = rules();
+    let mut t = Tracker::new(Session::default());
+    demarre(&mut t, "D1", &r);
+    t.handle("UpdateState", &etat("D1", 1, 2, 0, false), Some("NAME:epic|Dirayor"), &r);
+    t.handle("MatchDestroyed", &json!({ "MatchGuid": "D1" }), None, &r);
+    assert_eq!((t.session.wins, t.session.losses), (0, 1));
+    assert!(!t.session.recent[0].abandoned, "le match était fini : ce n'est pas un abandon");
+}
+
+#[test]
+fn but_en_prolongation_decide_le_match() {
+    let r = rules();
+    let mut t = Tracker::new(Session::default());
+    demarre(&mut t, "O1", &r);
+    t.handle("UpdateState", &etat("O1", 2, 2, 0, false), Some("NAME:epic|Dirayor"), &r);
+    // Prolongation à égalité : rien n'est décidé, partir est un abandon.
+    t.handle("UpdateState", &etat("O1", 2, 2, 20, true), Some("NAME:epic|Dirayor"), &r);
+    // But en or de l'équipe bleue : victoire, même sans MatchEnded.
+    t.handle("UpdateState", &etat("O1", 3, 2, 21, true), Some("NAME:epic|Dirayor"), &r);
+    t.handle("MatchDestroyed", &json!({ "MatchGuid": "O1" }), None, &r);
+    assert_eq!((t.session.wins, t.session.losses), (1, 0));
+    assert!(!t.session.recent[0].abandoned);
+}
+
+#[test]
+fn quitter_en_plein_match_reste_un_abandon() {
+    let r = rules();
+    let mut t = Tracker::new(Session::default());
+    demarre(&mut t, "A1", &r);
+    // En tête 3-1 mais il reste deux minutes : partir maintenant est bien un abandon.
+    t.handle("UpdateState", &etat("A1", 3, 1, 120, false), Some("NAME:epic|Dirayor"), &r);
+    t.handle("MatchDestroyed", &json!({ "MatchGuid": "A1" }), None, &r);
+    assert_eq!((t.session.wins, t.session.losses), (0, 1));
+    assert!(t.session.recent[0].abandoned);
+    // Égalité au chrono à zéro (la prolongation va commencer) : rien n'est décidé non plus.
+    let mut t = Tracker::new(Session::default());
+    demarre(&mut t, "A2", &r);
+    t.handle("UpdateState", &etat("A2", 2, 2, 0, false), Some("NAME:epic|Dirayor"), &r);
+    t.handle("MatchDestroyed", &json!({ "MatchGuid": "A2" }), None, &r);
+    assert!(t.session.recent[0].abandoned);
+}
+
+#[test]
+fn podium_termine_le_match_une_seule_fois() {
+    let r = rules();
+    let mut t = Tracker::new(Session::default());
+    demarre(&mut t, "P1", &r);
+    t.handle("UpdateState", &etat("P1", 4, 2, 0, false), Some("NAME:epic|Dirayor"), &r);
+    let podium = t.handle("PodiumStart", &json!({ "MatchGuid": "P1" }), None, &r);
+    assert!(podium.match_finished);
+    t.handle("MatchEnded", &json!({ "MatchGuid": "P1", "WinnerTeamNum": 0 }), None, &r);
+    t.handle("MatchDestroyed", &json!({ "MatchGuid": "P1" }), None, &r);
+    assert_eq!((t.session.wins, t.session.losses, t.session.games), (1, 0, 1), "compté une seule fois");
+}
+
 #[test]
 fn fin_de_match_declenche_une_seule_synchronisation() {
     let mut t = Tracker::new(Session::default());

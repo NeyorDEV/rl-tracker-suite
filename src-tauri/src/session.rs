@@ -308,6 +308,11 @@ struct MatchState {
     stats: Value,
     deaths: i64,
     winner_team: Option<i64>,
+    /// Score de chaque équipe (numéro d'équipe, buts) au dernier état reçu.
+    scores: Vec<(i64, i64)>,
+    overtime: bool,
+    /// Le temps réglementaire est écoulé (chrono à zéro, hors prolongation).
+    clock_expired: bool,
     started: bool,
     done: bool,
 }
@@ -322,9 +327,31 @@ impl MatchState {
             stats: Value::Null,
             deaths: 0,
             winner_team: None,
+            scores: Vec::new(),
+            overtime: false,
+            clock_expired: false,
             started: false,
             done: false,
         }
+    }
+
+    /// Équipe gagnante si le match est joué jusqu'au bout, même sans événement `MatchEnded`.
+    ///
+    /// Le jeu désigne un gagnant (`bHasWinner`) ou, à défaut, le match est décidé quand le temps
+    /// réglementaire est écoulé avec un score inégal, ou qu'un but en prolongation a été marqué
+    /// (le score n'est plus à égalité). Quitter pendant le podium ou l'écran de résultats ne
+    /// change donc plus une victoire en défaite.
+    fn decided_winner(&self) -> Option<i64> {
+        if self.winner_team.is_some() {
+            return self.winner_team;
+        }
+        if !self.started || !(self.clock_expired || self.overtime) || self.scores.len() < 2 {
+            return None;
+        }
+        let best = self.scores.iter().map(|(_, goals)| *goals).max()?;
+        let mut leaders = self.scores.iter().filter(|(_, goals)| *goals == best);
+        let leader = leaders.next()?;
+        (leaders.next().is_none()).then_some(leader.0)
     }
 }
 
@@ -427,6 +454,16 @@ impl Tracker {
                 let winner = d.get("WinnerTeamNum").and_then(Value::as_i64);
                 self.finish(winner, rules, &mut e);
             }
+            "PodiumStart" => {
+                // Le podium n'arrive qu'une fois le match terminé : si le gagnant n'a pas été
+                // annoncé, le score tranche.
+                if let Some(m) = self.current.as_mut() {
+                    m.clock_expired = true;
+                }
+                if let Some(winner) = self.current.as_ref().and_then(MatchState::decided_winner) {
+                    self.finish(Some(winner), rules, &mut e);
+                }
+            }
             "MatchDestroyed" => self.leave(rules, &mut e),
             _ => {}
         }
@@ -486,6 +523,15 @@ impl Tracker {
             }
         }
 
+        if let Some(teams) = g.get("Teams").and_then(Value::as_array) {
+            m.scores = teams
+                .iter()
+                .filter_map(|t| Some((t.get("TeamNum")?.as_i64()?, t.get("Score").and_then(Value::as_i64).unwrap_or(0))))
+                .collect();
+        }
+        m.overtime = bool_of(g, "bOvertime");
+        m.clock_expired = !m.overtime && g.get("TimeSeconds").and_then(Value::as_i64) == Some(0);
+
         if m.me.is_none() {
             m.me = identify(players, g, identity, e);
         }
@@ -535,8 +581,9 @@ impl Tracker {
             return;
         }
         m.done = true;
-        if let Some(winner) = m.winner_team {
-            // Le jeu avait déjà désigné un gagnant (forfait, fin sans MatchEnded).
+        if let Some(winner) = m.decided_winner() {
+            // Le match était déjà joué : gagnant désigné par le jeu (forfait, fin sans
+            // `MatchEnded`) ou imposé par le score une fois le temps écoulé. Ce n'est pas un abandon.
             let won = Some(winner) == m.my_team;
             self.record(&m, won, false, rules, e);
         } else if rules.count_leave_as_loss {
