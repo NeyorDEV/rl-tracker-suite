@@ -213,7 +213,7 @@
     $('ltPlayers').innerHTML = players.length
       ? players.map((p) => {
           const right = p.status === 'ready'
-            ? `${esc(p.best_tier_name)}${p.badge_labels.map((l) => `<span class="lt-tag">${esc(l)}</span>`).join('')}`
+            ? `${p.ranks.map((r) => `${esc(r.label)} ${esc(r.tier_name)}`).join(' · ')}${p.badge_labels.map((l) => `<span class="lt-tag">${esc(l)}</span>`).join('')}`
             : p.status === 'loading' ? 'chargement…' : 'indisponible';
           return `<div class="lt-player ${p.relation}"><span>${esc(p.name)} <small>${p.relation}</small></span><span>${right}</span></div>`;
         }).join('')

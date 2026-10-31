@@ -38,6 +38,9 @@
   .chip .name { max-width: 150px; }
   .chip .grow { flex: 1; }
   .idx { color: #ffcf5c; font-size: 12px; }
+  .rk { white-space: nowrap; }
+  .rk i { font-style: normal; color: var(--muted); }
+  .rk.peak { color: #ffcf5c; }
   .ranks, .loading, .best { font-size: 12px; color: color-mix(in srgb, var(--text) 85%, transparent); font-weight: 500; }
   .loading { color: var(--muted); font-weight: 400; }
   .badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
@@ -60,6 +63,11 @@
 
   let layout = "card_vertical", scale = 100;
 
+  // Rangs utiles seulement : mode joué, puis 1v1 / meilleur rang / rang actuel et pic selon le profil.
+  function ranksHtml(p) {
+    return p.ranks.map(r => '<span class="rk ' + r.role + '"><i>' + esc(r.label) + "</i> " + esc(r.tier_name) + "</span>").join(" · ");
+  }
+
   function badgesHtml(p) {
     return p.badges.map((b, i) => '<span class="badge ' + b + '">' + esc(p.badge_labels[i]) + "</span>").join("");
   }
@@ -70,9 +78,8 @@
     if (p.status === "loading") body = '<div class="loading">chargement…</div>';
     else if (p.status === "failed") body = '<div class="loading">profil indisponible</div>';
     else {
-      const ranks = p.ranks.map(r => r.label + " " + esc(r.tier_name)).join(" · ");
       const badges = badgesHtml(p);
-      body = '<div class="ranks">' + ranks + "</div>" + (badges ? '<div class="badges">' + badges + "</div>" : "");
+      body = '<div class="ranks">' + ranksHtml(p) + "</div>" + (badges ? '<div class="badges">' + badges + "</div>" : "");
     }
     return '<div class="card ' + p.relation + '"><div class="row-top"><span class="name">' + esc(p.name) + "</span>" + idx + "</div>" + body + "</div>";
   }
@@ -82,7 +89,7 @@
     let mid;
     if (p.status === "loading") mid = '<span class="loading">chargement…</span>';
     else if (p.status === "failed") mid = '<span class="loading">indisponible</span>';
-    else mid = '<span class="best">' + esc(p.best_tier_name) + "</span>" + idx + '<span class="badges">' + badgesHtml(p) + "</span>";
+    else mid = '<span class="best">' + ranksHtml(p) + "</span>" + idx + '<span class="badges">' + badgesHtml(p) + "</span>";
     return '<div class="chip ' + p.relation + '"><span class="name grow">' + esc(p.name) + "</span>" + mid + "</div>";
   }
 

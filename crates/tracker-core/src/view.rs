@@ -31,8 +31,23 @@ pub enum PlayerStatus {
     Failed,
 }
 
+/// Pourquoi un rang est affiché : seuls les rangs utiles sont montrés.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RankRole {
+    /// Rang dans le mode de la partie en cours.
+    Mode,
+    /// Rang actuel d'un ancien haut niveau.
+    Current,
+    /// Rang maximum atteint.
+    Peak,
+    /// Autre rang qui explique un badge (1v1 d'un spécialiste, meilleur rang d'un smurf).
+    Extra,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RankView {
+    pub role: RankRole,
     pub playlist: PlaylistKind,
     pub label: String,
     pub tier: u32,
@@ -61,6 +76,9 @@ pub struct LobbySnapshot {
     /// Nombre de joueurs encore en cours de résolution.
     pub pending: usize,
     pub updated_at: i64,
+    /// Mode de la partie en cours (1v1, 2v2, 3v3…), s'il est connu.
+    #[serde(default)]
+    pub playlist: Option<PlaylistKind>,
     /// Joueur local détecté ou configuré (ex. « neyor. · epic »).
     #[serde(default)]
     pub me: Option<String>,

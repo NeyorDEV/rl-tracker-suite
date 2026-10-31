@@ -5,7 +5,7 @@
 
 use tracker_core::{
     tier_name, Badge, Config, PlayerId, PlayerProfile, PlayerStatus, PlayerView, PlaylistKind,
-    RankView, Relation, Team,
+    RankRole, RankView, Relation, Team,
 };
 
 /// Écart de tiers entre le 1v1 et le reste du lobby pour déclencher « Joueur 1v1 ».
@@ -142,7 +142,8 @@ pub fn analyze(p: &PlayerProfile, ctx: &LobbyContext, cfg: &Config) -> Analysis 
 }
 
 /// Construit les vues de l'overlay : filtre « adversaires uniquement », badges et tri.
-pub fn build_views(entries: &[LobbyEntry], cfg: &Config) -> Vec<PlayerView> {
+/// `playlist` : mode de la partie en cours, dont le rang est celui qui compte.
+pub fn build_views(entries: &[LobbyEntry], cfg: &Config, playlist: Option<PlaylistKind>) -> Vec<PlayerView> {
     let ctx = LobbyContext::from_profiles(entries.iter().filter_map(|e| match &e.state {
         EntryState::Ready(p) => Some(p.as_ref()),
         _ => None,
@@ -151,7 +152,7 @@ pub fn build_views(entries: &[LobbyEntry], cfg: &Config) -> Vec<PlayerView> {
     let mut views: Vec<PlayerView> = entries
         .iter()
         .filter(|e| !(cfg.filters.only_opponents && e.relation == Relation::Teammate))
-        .map(|e| view_of(e, &ctx, cfg))
+        .map(|e| view_of(e, &ctx, cfg, playlist))
         .collect();
 
     let rank = |r: Relation| match r {
@@ -165,7 +166,7 @@ pub fn build_views(entries: &[LobbyEntry], cfg: &Config) -> Vec<PlayerView> {
     views
 }
 
-fn view_of(e: &LobbyEntry, ctx: &LobbyContext, cfg: &Config) -> PlayerView {
+fn view_of(e: &LobbyEntry, ctx: &LobbyContext, cfg: &Config, playlist: Option<PlaylistKind>) -> PlayerView {
     let mut v = PlayerView {
         key: e.id.key(),
         name: e.name.clone(),
@@ -194,31 +195,65 @@ fn view_of(e: &LobbyEntry, ctx: &LobbyContext, cfg: &Config) -> PlayerView {
                     _ => b.label_fr().to_string(),
                 })
                 .collect();
+            let ranks = relevant_ranks(p, &a.badges, playlist);
             v.badges = a.badges;
             if !p.display_name.is_empty() {
                 v.name = p.display_name.clone();
             }
-            v.best_tier_name = tier_name(p.best_tier()).to_string();
             v.total_wins = Some(p.total_wins);
-            v.ranks = p
-                .playlists
-                .iter()
-                .filter(|s| s.kind.is_core_ranked() && s.tier > 0)
-                .map(|s| RankView {
-                    playlist: s.kind,
-                    label: s.kind.short_label().to_string(),
-                    tier: s.tier,
-                    tier_name: tier_name(s.tier).to_string(),
-                })
-                .collect();
-            v.ranks.sort_by_key(|r| match r.playlist {
-                PlaylistKind::Duel => 0,
-                PlaylistKind::Doubles => 1,
-                _ => 2,
-            });
+            v.ranks = ranks;
+            v.best_tier_name = v.ranks.first().map(|r| r.tier_name.clone()).unwrap_or_default();
         }
     }
     v
+}
+
+fn rank_of(kind: PlaylistKind, tier: u32, label: &str, role: RankRole) -> RankView {
+    RankView { role, playlist: kind, label: label.to_string(), tier, tier_name: tier_name(tier).to_string() }
+}
+
+/// Rang de `kind` si le joueur y est classé.
+fn tier_in(p: &PlayerProfile, kind: PlaylistKind) -> Option<u32> {
+    p.tier_of(kind).filter(|t| *t > 0)
+}
+
+/// Les rangs qui valent la peine d'être affichés, et pas les trois modes pour tout le monde :
+/// - le rang dans le mode de la partie en cours (à défaut, le meilleur rang) ;
+/// - le 1v1 d'un spécialiste du 1v1 ;
+/// - le meilleur rang d'un smurf, s'il n'est pas déjà celui du mode joué ;
+/// - pour un ancien haut niveau, son rang actuel et son rang maximum.
+fn relevant_ranks(p: &PlayerProfile, badges: &[Badge], playlist: Option<PlaylistKind>) -> Vec<RankView> {
+    let mode = playlist.filter(|k| k.is_core_ranked());
+    let best = [PlaylistKind::Duel, PlaylistKind::Doubles, PlaylistKind::Standard]
+        .into_iter()
+        .filter_map(|k| tier_in(p, k).map(|t| (k, t)))
+        .max_by_key(|(_, t)| *t);
+
+    // Rang principal : celui du mode joué, sinon le meilleur.
+    let main = mode.and_then(|k| tier_in(p, k).map(|t| (k, t))).or(best);
+    let Some((main_kind, main_tier)) = main else { return Vec::new() };
+    let former_high = badges.contains(&Badge::PeakDisparity);
+    let main_role = if former_high { RankRole::Current } else { RankRole::Mode };
+    let main_label = if former_high { "Actuel" } else { main_kind.short_label() };
+    let mut ranks = vec![rank_of(main_kind, main_tier, main_label, main_role)];
+
+    if badges.contains(&Badge::OneVOneSpecialist) && main_kind != PlaylistKind::Duel {
+        if let Some(t) = tier_in(p, PlaylistKind::Duel) {
+            ranks.push(rank_of(PlaylistKind::Duel, t, "1v1", RankRole::Extra));
+        }
+    }
+    if badges.contains(&Badge::SmurfSuspect) {
+        // Jamais deux fois le même mode (ex. un spécialiste 1v1 dont le 1v1 est déjà affiché).
+        if let Some((k, t)) = best.filter(|(k, t)| *t > main_tier && !ranks.iter().any(|r| r.playlist == *k)) {
+            ranks.push(rank_of(k, t, k.short_label(), RankRole::Extra));
+        }
+    }
+    if former_high {
+        if let Some(peak) = p.peak_tier {
+            ranks.push(rank_of(main_kind, peak, "Pic", RankRole::Peak));
+        }
+    }
+    ranks
 }
 
 #[cfg(test)]
@@ -405,9 +440,9 @@ mod tests {
             entry("3", Relation::Unknown, None),
         ];
         let mut cfg = Config::default();
-        assert_eq!(build_views(&entries, &cfg).len(), 3);
+        assert_eq!(build_views(&entries, &cfg, None).len(), 3);
         cfg.filters.only_opponents = true;
-        let v = build_views(&entries, &cfg);
+        let v = build_views(&entries, &cfg, None);
         assert_eq!(v.len(), 2);
         assert!(v.iter().all(|x| x.relation != Relation::Teammate));
     }
@@ -422,7 +457,7 @@ mod tests {
             entry("3", Relation::Opponent, Some(base("3"))),
             entry("2", Relation::Opponent, Some(smurf)),
         ];
-        let v = build_views(&entries, &Config::default());
+        let v = build_views(&entries, &Config::default(), None);
         assert_eq!(v[0].name, "2");
         assert_eq!(v[1].name, "3");
         assert_eq!(v[2].relation, Relation::Teammate);
@@ -431,7 +466,7 @@ mod tests {
 
     #[test]
     fn loading_entries_have_no_badges() {
-        let v = build_views(&[entry("1", Relation::Opponent, None)], &Config::default());
+        let v = build_views(&[entry("1", Relation::Opponent, None)], &Config::default(), None);
         assert_eq!(v[0].status, PlayerStatus::Loading);
         assert!(v[0].badges.is_empty());
     }
@@ -445,5 +480,78 @@ mod tests {
         c.playlists = vec![pl(PlaylistKind::Doubles, 18, 10)];
         let ctx = LobbyContext::from_profiles([&a, &b, &c]);
         assert_eq!(ctx.median_team_tier, Some(16.0));
+    }
+
+    fn labels(ranks: &[RankView]) -> Vec<String> {
+        ranks.iter().map(|r| format!("{} {}", r.label, r.tier_name)).collect()
+    }
+
+    fn full(duel: u32, doubles: u32, standard: u32) -> PlayerProfile {
+        let mut p = base("9");
+        p.playlists = vec![
+            pl(PlaylistKind::Duel, duel, 80),
+            pl(PlaylistKind::Doubles, doubles, 80),
+            pl(PlaylistKind::Standard, standard, 80),
+        ];
+        p
+    }
+
+    #[test]
+    fn a_normal_player_shows_only_the_rank_of_the_mode_being_played() {
+        let p = full(10, 13, 11);
+        let ranks = relevant_ranks(&p, &[], Some(PlaylistKind::Doubles));
+        assert_eq!(labels(&ranks), vec!["2v2 Diamond 1"], "ni le 1v1 ni le 3v3");
+        // Mode inconnu (partie privée, début de lobby) : on montre au moins le meilleur rang.
+        let ranks = relevant_ranks(&p, &[], None);
+        assert_eq!(labels(&ranks), vec!["2v2 Diamond 1"]);
+        // Non classé dans le mode joué : repli sur le meilleur rang plutôt que rien.
+        let mut q = full(0, 0, 14);
+        q.playlists.retain(|s| s.tier > 0);
+        assert_eq!(labels(&relevant_ranks(&q, &[], Some(PlaylistKind::Doubles))), vec!["3v3 Diamond 2"]);
+    }
+
+    #[test]
+    fn a_one_v_one_specialist_also_shows_his_duel_rank() {
+        let p = full(18, 12, 12);
+        let ranks = relevant_ranks(&p, &[Badge::OneVOneSpecialist], Some(PlaylistKind::Doubles));
+        assert_eq!(labels(&ranks), vec!["2v2 Platinum 3", "1v1 Champion 3"]);
+        // En 1v1, le rang du mode est déjà le duel : pas de doublon.
+        let ranks = relevant_ranks(&p, &[Badge::OneVOneSpecialist], Some(PlaylistKind::Duel));
+        assert_eq!(labels(&ranks), vec!["1v1 Champion 3"]);
+    }
+
+    #[test]
+    fn a_smurf_shows_his_best_rank_when_it_is_in_another_mode() {
+        let p = full(12, 13, 19);
+        let ranks = relevant_ranks(&p, &[Badge::SmurfSuspect], Some(PlaylistKind::Doubles));
+        assert_eq!(labels(&ranks), vec!["2v2 Diamond 1", "3v3 Grand Champion 1"]);
+        // S'il est déjà fort dans le mode joué : un seul rang.
+        let ranks = relevant_ranks(&p, &[Badge::SmurfSuspect], Some(PlaylistKind::Standard));
+        assert_eq!(labels(&ranks), vec!["3v3 Grand Champion 1"]);
+    }
+
+    #[test]
+    fn a_smurf_who_is_also_a_one_v_one_specialist_shows_each_rank_once() {
+        let p = full(19, 12, 12);
+        let badges = [Badge::SmurfSuspect, Badge::OneVOneSpecialist];
+        let ranks = relevant_ranks(&p, &badges, Some(PlaylistKind::Doubles));
+        assert_eq!(labels(&ranks), vec!["2v2 Platinum 3", "1v1 Grand Champion 1"]);
+    }
+
+    #[test]
+    fn a_former_high_player_shows_current_and_peak_ranks() {
+        let mut p = full(10, 14, 14);
+        p.peak_tier = Some(20);
+        let ranks = relevant_ranks(&p, &[Badge::PeakDisparity], Some(PlaylistKind::Doubles));
+        assert_eq!(labels(&ranks), vec!["Actuel Diamond 2", "Pic Grand Champion 2"]);
+        assert_eq!((ranks[0].role, ranks[1].role), (RankRole::Current, RankRole::Peak));
+    }
+
+    #[test]
+    fn views_carry_only_the_relevant_ranks() {
+        let entries = vec![entry("1", Relation::Opponent, Some(full(10, 13, 11)))];
+        let v = build_views(&entries, &Config::default(), Some(PlaylistKind::Doubles));
+        assert_eq!(v[0].ranks.len(), 1);
+        assert_eq!(v[0].best_tier_name, "Diamond 1");
     }
 }

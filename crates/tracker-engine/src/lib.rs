@@ -17,7 +17,7 @@ use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 use tracker_cache::Cache;
-use tracker_core::{unix_now, Config, LobbySnapshot, Platform, PlayerId, Relation, Team};
+use tracker_core::{unix_now, Config, LobbySnapshot, Platform, PlayerId, PlaylistKind, Relation, Team};
 use tracker_heuristics::EntryState;
 use tracker_parser::{parse_stats_event, ParsedEvent};
 use tracker_scraper::{
@@ -82,6 +82,8 @@ struct Inner {
     preview: AtomicBool,
     /// Joueurs dont la recherche a échoué récemment (heure Unix), pour ne pas insister.
     failures: Mutex<HashMap<PlayerId, i64>>,
+    /// Mode de la partie en cours, d'après la Stats API (rang à mettre en avant).
+    playlist: Mutex<Option<PlaylistKind>>,
 }
 
 pub struct Engine {
@@ -113,6 +115,7 @@ impl Engine {
             detected_self: Mutex::new(None),
             preview: AtomicBool::new(false),
             failures: Mutex::default(),
+            playlist: Mutex::default(),
         });
 
         let mut sources: Vec<Arc<dyn Fetcher>> = Vec::new();
@@ -216,6 +219,7 @@ impl Engine {
     /// l'ancien et le lobby en cours jusqu'à la prochaine détection.
     pub fn game_launched(&self) {
         *self.inner.detected_self.lock().unwrap() = None;
+        *self.inner.playlist.lock().unwrap() = None;
         self.inner.queue.clear();
         self.inner.lobby.lock().unwrap().reset();
         self.inner.emit();
@@ -254,9 +258,16 @@ impl Inner {
             ParsedEvent::Kickoff => {
                 let _ = self.kickoffs.send(());
             }
+            ParsedEvent::Playlist(kind) => {
+                let changed = self.playlist.lock().unwrap().replace(kind) != Some(kind);
+                if changed {
+                    self.emit();
+                }
+            }
             ParsedEvent::LobbyReset => {
                 self.queue.clear();
                 self.lobby.lock().unwrap().reset();
+                *self.playlist.lock().unwrap() = None;
                 self.emit();
             }
             ParsedEvent::PlayerSeen { id, name, team } => self.handle_seen(id, name, team),
@@ -368,16 +379,20 @@ impl Inner {
         let cfg = self.cfg.read().unwrap().clone();
         if self.preview.load(Ordering::SeqCst) {
             let entries = demo::demo_entries();
+            let playlist = Some(PlaylistKind::Doubles);
             return LobbySnapshot {
                 pending: 1,
-                players: tracker_heuristics::build_views(&entries, &cfg),
+                players: tracker_heuristics::build_views(&entries, &cfg, playlist),
+                playlist,
                 updated_at: unix_now(),
                 me: self.me_label(),
             };
         }
+        let playlist = *self.playlist.lock().unwrap();
         let lobby = self.lobby.lock().unwrap();
         LobbySnapshot {
-            players: tracker_heuristics::build_views(lobby.entries(), &cfg),
+            players: tracker_heuristics::build_views(lobby.entries(), &cfg, playlist),
+            playlist,
             pending: lobby.loading_count(),
             updated_at: unix_now(),
             me: self.me_label(),
@@ -537,6 +552,16 @@ mod tests {
         assert!(snap.players.is_empty());
         assert!(e.set_local_player("steam", "76561198012345678", "SteamMe"));
         assert_eq!(e.snapshot().me.as_deref(), Some("SteamMe · steam"));
+    }
+
+    #[test]
+    fn the_game_mode_comes_from_the_stats_api_and_resets_with_the_lobby() {
+        let e = engine(Config::default());
+        assert_eq!(e.snapshot().playlist, None);
+        e.ingest_stats("UpdateState", &json!({"Game": {"PlaylistId": 11}, "Players": []}));
+        assert_eq!(e.snapshot().playlist, Some(PlaylistKind::Doubles));
+        e.ingest_stats("MatchCreated", &json!({}));
+        assert_eq!(e.snapshot().playlist, None, "nouveau match : le mode est reconnu à nouveau");
     }
 
     #[test]

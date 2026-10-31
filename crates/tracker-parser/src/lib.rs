@@ -5,13 +5,15 @@
 //! `stats_client` de RL Tracker Suite ; ce crate ne reçoit que (nom d'événement, données).
 
 use serde_json::Value;
-use tracker_core::{Platform, PlayerId, Team};
+use tracker_core::{Platform, PlayerId, PlaylistKind, Team};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParsedEvent {
     PlayerSeen { id: PlayerId, name: Option<String>, team: Option<Team> },
     /// Nouveau match / retour au menu : la liste des joueurs doit être vidée.
     LobbyReset,
+    /// Mode de la partie en cours (`Game.PlaylistId`).
+    Playlist(PlaylistKind),
     /// Fin du décompte 3-2-1 : le coup d'envoi vient d'être donné (événement `RoundStarted`).
     Kickoff,
 }
@@ -60,6 +62,10 @@ pub fn parse_stats_event(event: &str, data: &Value) -> Vec<ParsedEvent> {
     }
     if event == "RoundStarted" {
         out.push(ParsedEvent::Kickoff);
+    }
+    let playlist = data.pointer("/Game/PlaylistId").and_then(Value::as_i64).and_then(PlaylistKind::from_playlist_id);
+    if let Some(kind) = playlist {
+        out.push(ParsedEvent::Playlist(kind));
     }
     if let Some(players) = data.get("Players").and_then(Value::as_array) {
         for p in players {
@@ -121,6 +127,13 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn update_state_tells_the_game_mode() {
+        let ev = parse_stats_event("UpdateState", &json!({"Game": {"PlaylistId": 11}}));
+        assert_eq!(ev, vec![ParsedEvent::Playlist(PlaylistKind::Doubles)]);
+        assert!(parse_stats_event("UpdateState", &json!({"Game": {"PlaylistId": 6}})).is_empty());
     }
 
     #[test]

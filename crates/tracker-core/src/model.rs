@@ -153,6 +153,21 @@ impl PlaylistKind {
         }
     }
 
+    /// Mode d'un identifiant de playlist du jeu (classé ou occasionnel), si on sait le rattacher
+    /// à un rang : 1 et 10 = duel, 2 et 11 = doubles, 3 et 13 = standard, puis les modes annexes.
+    pub fn from_playlist_id(id: i64) -> Option<Self> {
+        match id {
+            1 | 10 => Some(PlaylistKind::Duel),
+            2 | 11 => Some(PlaylistKind::Doubles),
+            3 | 13 => Some(PlaylistKind::Standard),
+            27 => Some(PlaylistKind::Hoops),
+            28 => Some(PlaylistKind::Rumble),
+            29 => Some(PlaylistKind::Dropshot),
+            30 => Some(PlaylistKind::Snowday),
+            _ => None,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             PlaylistKind::Duel => "duel",
@@ -280,6 +295,15 @@ mod tests {
         let id = PlayerId::new(Platform::Epic, "ABCDEF0123456789ABCDEF0123456789");
         assert_eq!(id.key(), "epic:abcdef0123456789abcdef0123456789");
         assert_eq!(PlayerId::from_key(&id.key()), Some(id));
+    }
+
+    #[test]
+    fn game_playlist_ids_map_to_a_mode() {
+        assert_eq!(PlaylistKind::from_playlist_id(11), Some(PlaylistKind::Doubles));
+        assert_eq!(PlaylistKind::from_playlist_id(2), Some(PlaylistKind::Doubles), "occasionnel -> même mode");
+        assert_eq!(PlaylistKind::from_playlist_id(10), Some(PlaylistKind::Duel));
+        assert_eq!(PlaylistKind::from_playlist_id(13), Some(PlaylistKind::Standard));
+        assert_eq!(PlaylistKind::from_playlist_id(6), None, "partie privée");
     }
 
     #[test]

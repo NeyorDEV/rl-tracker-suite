@@ -10,7 +10,7 @@ pub use model::{ RecentForm,
     tier_name, PlayerId, PlayerProfile, Platform, PlaylistKind, PlaylistStat, Relation, Team,
     TIER_C2,
 };
-pub use view::{Badge, LobbySnapshot, PlayerStatus, PlayerView, RankView};
+pub use view::{Badge, LobbySnapshot, PlayerStatus, PlayerView, RankRole, RankView};
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
