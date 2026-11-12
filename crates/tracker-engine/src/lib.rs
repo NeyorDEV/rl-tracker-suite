@@ -17,7 +17,7 @@ use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 use tracker_cache::Cache;
-use tracker_core::{unix_now, Config, LobbySnapshot, Platform, PlayerId, PlaylistKind, Relation, Team};
+use tracker_core::{unix_now, Config, EncounterView, LobbySnapshot, Platform, PlayerId, PlaylistKind, Relation, Team};
 use tracker_heuristics::EntryState;
 use tracker_parser::{parse_stats_event, ParsedEvent};
 use tracker_scraper::{
@@ -84,6 +84,13 @@ struct Inner {
     failures: Mutex<HashMap<PlayerId, i64>>,
     /// Mode de la partie en cours, d'après la Stats API (rang à mettre en avant).
     playlist: Mutex<Option<PlaylistKind>>,
+    /// Matchs déjà joués avec ou contre chaque joueur (clé `plateforme:id`).
+    encounters: RwLock<HashMap<String, EncounterView>>,
+}
+
+/// Clé de joueur (`plateforme:id`) à partir d'un `PrimaryId` de la Stats API (`Epic|id|0`).
+pub fn player_key_from_primary_id(primary_id: &str) -> Option<String> {
+    tracker_parser::typed_id(primary_id).map(|id| id.key())
 }
 
 pub struct Engine {
@@ -116,6 +123,7 @@ impl Engine {
             preview: AtomicBool::new(false),
             failures: Mutex::default(),
             playlist: Mutex::default(),
+            encounters: RwLock::default(),
         });
 
         let mut sources: Vec<Arc<dyn Fetcher>> = Vec::new();
@@ -234,6 +242,12 @@ impl Engine {
         *self.inner.detected_self.lock().unwrap() = Some((pid, Some(name.to_string()).filter(|n| !n.is_empty())));
         self.inner.emit();
         true
+    }
+
+    /// Remplace l'historique des rencontres et rafraîchit le lobby affiché.
+    pub fn set_encounters(&self, encounters: HashMap<String, EncounterView>) {
+        *self.inner.encounters.write().unwrap() = encounters;
+        self.inner.emit();
     }
 
     /// Injecte un identifiant à la main (utile pour tester sans lancer le jeu).
@@ -390,8 +404,13 @@ impl Inner {
         }
         let playlist = *self.playlist.lock().unwrap();
         let lobby = self.lobby.lock().unwrap();
+        let mut players = tracker_heuristics::build_views(lobby.entries(), &cfg, playlist);
+        let encounters = self.encounters.read().unwrap();
+        for p in &mut players {
+            p.encounter = encounters.get(&p.key).copied();
+        }
         LobbySnapshot {
-            players: tracker_heuristics::build_views(lobby.entries(), &cfg, playlist),
+            players,
             playlist,
             pending: lobby.loading_count(),
             updated_at: unix_now(),
@@ -512,6 +531,17 @@ mod tests {
         assert_eq!(e.inner.queue.pending(), 2, "un blocage ou un délai dépassé ne condamne pas le joueur");
         assert_eq!(e.inner.queue.pop_next(), Some(id(2)));
         assert_eq!(e.inner.queue.pop_next(), Some(id(3)));
+    }
+
+    #[test]
+    fn past_encounters_are_attached_to_lobby_players() {
+        let e = engine(Config::default());
+        e.inject_player(id(1), Some("Foe".into()), Some(Team::Orange));
+        assert_eq!(e.snapshot().players[0].encounter, None);
+        let view = EncounterView { against_wins: 2, against_losses: 1, with_wins: 0, with_losses: 0, last_seen: 5 };
+        e.set_encounters(HashMap::from([(id(1).key(), view)]));
+        assert_eq!(e.snapshot().players[0].encounter, Some(view));
+        assert_eq!(player_key_from_primary_id("Steam|76561198000000001|0"), Some("steam:76561198000000001".into()));
     }
 
     #[test]

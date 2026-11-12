@@ -625,3 +625,21 @@ fn test_live_player_detection() {
     let detected = rl_config::detect_player_from_logs(None);
     println!("Detected player: {:?}", detected);
 }
+
+#[test]
+fn un_match_termine_alimente_l_historique_des_rencontres_sauf_un_abandon() {
+    let r = rules();
+    let mut t = Tracker::new(Session::default());
+    demarre(&mut t, "H1", &r);
+    t.handle("UpdateState", &etat("H1", 3, 1, 0, false), Some("NAME:epic|Dirayor"), &r);
+    let end = t.handle("MatchEnded", &json!({ "MatchGuid": "H1", "WinnerTeamNum": 0 }), None, &r);
+    let played = end.played.expect("match joué jusqu'au bout");
+    assert!(played.won && played.my_team == 0);
+    assert!(played.players.iter().any(|(id, _, team)| id == "Epic|op|0" && *team == 1));
+
+    // Abandon en plein match : aucune rencontre enregistrée.
+    demarre(&mut t, "H2", &r);
+    t.handle("UpdateState", &etat("H2", 3, 1, 120, false), Some("NAME:epic|Dirayor"), &r);
+    let left = t.handle("MatchDestroyed", &json!({ "MatchGuid": "H2" }), None, &r);
+    assert!(left.played.is_none());
+}

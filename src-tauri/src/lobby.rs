@@ -139,6 +139,11 @@ pub fn on_stats_event(app: &AppHandle, name: &str, data: &Value) {
     lobby(app).engine.ingest_stats(name, data);
 }
 
+/// L'historique des rencontres a changé : le lobby affiché est rafraîchi.
+pub fn set_encounters(app: &AppHandle, encounters: std::collections::HashMap<String, tracker_core::EncounterView>) {
+    lobby(app).engine.set_encounters(encounters);
+}
+
 /// Rocket League vient d'être lancé : l'ancien compte et le lobby sont oubliés.
 pub fn on_game_launched(app: &AppHandle) {
     lobby(app).engine.game_launched();

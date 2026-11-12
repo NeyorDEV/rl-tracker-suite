@@ -43,6 +43,8 @@
   .rk.peak { color: #ffcf5c; }
   .ranks, .loading, .best { font-size: 12px; color: color-mix(in srgb, var(--text) 85%, transparent); font-weight: 500; }
   .loading { color: var(--muted); font-weight: 400; }
+  .met { font-size: 11px; color: var(--muted); margin-top: 2px; white-space: nowrap; }
+  .chip .met { margin: 0; }
   .badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
   .chip .badges { margin: 0; flex-wrap: nowrap; }
   .badge { font-size: 11px; padding: 1px 6px; border-radius: 9px; background: var(--b-1v1); white-space: nowrap; }
@@ -68,6 +70,23 @@
     return p.ranks.map(r => '<span class="rk ' + r.role + '"><i>' + esc(r.label) + "</i> " + esc(r.tier_name) + "</span>").join(" · ");
   }
 
+  // Matchs déjà joués avec ou contre ce joueur : « contre lui 2V-1D · avec lui 1V-0D · il y a 3 j ».
+  function ago(ts) {
+    const m = Math.max(0, Math.floor((Date.now() / 1000 - ts) / 60));
+    if (m < 60) return "il y a " + Math.max(1, m) + " min";
+    if (m < 60 * 48) return "il y a " + Math.floor(m / 60) + " h";
+    return "il y a " + Math.floor(m / 1440) + " j";
+  }
+  function metHtml(p) {
+    const e = p.encounter;
+    if (!e || e.against_wins + e.against_losses + e.with_wins + e.with_losses === 0) return "";
+    const parts = [];
+    if (e.against_wins + e.against_losses > 0) parts.push("contre lui " + e.against_wins + "V-" + e.against_losses + "D");
+    if (e.with_wins + e.with_losses > 0) parts.push("avec lui " + e.with_wins + "V-" + e.with_losses + "D");
+    parts.push(ago(e.last_seen));
+    return '<div class="met">Déjà croisé · ' + esc(parts.join(" · ")) + "</div>";
+  }
+
   function badgesHtml(p) {
     return p.badges.map((b, i) => '<span class="badge ' + b + '">' + esc(p.badge_labels[i]) + "</span>").join("");
   }
@@ -81,6 +100,7 @@
       const badges = badgesHtml(p);
       body = '<div class="ranks">' + ranksHtml(p) + "</div>" + (badges ? '<div class="badges">' + badges + "</div>" : "");
     }
+    body += metHtml(p);
     return '<div class="card ' + p.relation + '"><div class="row-top"><span class="name">' + esc(p.name) + "</span>" + idx + "</div>" + body + "</div>";
   }
 
@@ -89,7 +109,7 @@
     let mid;
     if (p.status === "loading") mid = '<span class="loading">chargement…</span>';
     else if (p.status === "failed") mid = '<span class="loading">indisponible</span>';
-    else mid = '<span class="best">' + ranksHtml(p) + "</span>" + idx + '<span class="badges">' + badgesHtml(p) + "</span>";
+    else mid = '<span class="best">' + ranksHtml(p) + "</span>" + idx + '<span class="badges">' + badgesHtml(p) + "</span>" + metHtml(p);
     return '<div class="chip ' + p.relation + '"><span class="name grow">' + esc(p.name) + "</span>" + mid + "</div>";
   }
 

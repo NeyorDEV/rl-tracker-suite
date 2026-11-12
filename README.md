@@ -73,6 +73,7 @@ It only communicates through Rocket League's **official native local telemetry S
 ### Tab 2 - LobbyTracker
 
 * **Live lobby analysis**: every player of the match is looked up on Tracker Network (opponents first). Only the useful ranks are shown: the rank in the mode being played (2v2 in a 2v2), plus the 1v1 rank of a 1v1 specialist, the best rank of a smurf, and the current and peak ranks of a former high-level player. Profiles are cached in SQLite (24 h by default) so known players appear instantly.
+* **Past encounters**: every finished match is remembered locally (`encounters.json`, no network). When a player you already met shows up in a lobby, the overlay adds "Already met: against him 2W-1L · with him 1W-0L · 3 d ago". Abandoned matches are not counted.
 * **Badges, each of them can be turned off** (a disabled badge is neither computed nor sent to the overlay):
 
   | Badge | Default rule |

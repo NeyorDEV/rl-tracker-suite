@@ -27,7 +27,8 @@ use tauri::{
 };
 use tauri_plugin_dialog::DialogExt;
 
-use session::{calculate_rank, now_ms, CountRules, Effects, Session, Tracker, PLAYLISTS, RANKED};
+use session::{calculate_rank, now_ms, CountRules, Effects, PlayedMatch, Session, Tracker, PLAYLISTS, RANKED};
+use tracker_core::{EncounterBook, Participant};
 use settings::SettingsStore;
 use stats_client::ClientEvent;
 use web_server::WebServer;
@@ -50,6 +51,9 @@ struct Core {
     log_file: PathBuf,
     documents_dir: Option<PathBuf>,
     current_player_key: String,
+    /// Joueurs déjà croisés (avec ou contre), sauvegardés dans `encounters.json`.
+    encounters: EncounterBook,
+    encounters_file: PathBuf,
 }
 
 fn sanitize_account_key(platform: &str, name: &str) -> String {
@@ -69,6 +73,24 @@ fn sanitize_account_key(platform: &str, name: &str) -> String {
 }
 
 impl Core {
+    /// Ajoute un match terminé à l'historique des rencontres, le sauvegarde, et renvoie
+    /// les vues à transmettre au LobbyTracker.
+    fn record_encounters(&mut self, played: &PlayedMatch, now: i64) -> std::collections::HashMap<String, tracker_core::EncounterView> {
+        let players: Vec<Participant> = played
+            .players
+            .iter()
+            .filter_map(|(id, name, team)| {
+                Some(Participant { key: tracker_engine::player_key_from_primary_id(id)?, name: name.clone(), team: *team })
+            })
+            .collect();
+        let me = played.my_id.as_deref().and_then(tracker_engine::player_key_from_primary_id);
+        self.encounters.record_match(me.as_deref(), played.my_team, played.won, &players, now);
+        if let Ok(text) = serde_json::to_string(&self.encounters) {
+            let _ = fs::write(&self.encounters_file, text);
+        }
+        self.encounters.views()
+    }
+
     fn rules(&self) -> CountRules {
         let c = &self.store.data.counting;
         let o = &self.store.data.overlay;
@@ -362,6 +384,10 @@ fn after_effects(app: &AppHandle, effects: Effects) {
         }
         if effects.session_changed {
             c.persist_session();
+        }
+        if let Some(played) = &effects.played {
+            let views = c.record_encounters(played, tracker_core::unix_now());
+            lobby::set_encounters(app, views);
         }
         // Fin de match : le MMR officiel a bougé. Une seule synchronisation, un peu plus tard pour
         // laisser à Tracker Network le temps de se mettre à jour. (Pas au changement de mode.)
@@ -1247,6 +1273,12 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let server_port = store.data.server.port;
     let lobby_engine = lobby::create_engine(app.handle(), store.data.lobbytracker.clone(), &data_dir.join("lobby_cache.db"))?;
     let history_file = data_dir.join("history.json");
+    let encounters_file = data_dir.join("encounters.json");
+    let encounters: EncounterBook = fs::read_to_string(&encounters_file)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default();
+    lobby_engine.set_encounters(encounters.views());
     let core = Core {
         store,
         tracker: Tracker::new(session),
@@ -1259,6 +1291,8 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         log_file,
         documents_dir,
         current_player_key: initial_key,
+        encounters,
+        encounters_file,
     };
     core.persist_session();
     let core = Arc::new(Mutex::new(core));

@@ -179,6 +179,7 @@ fn view_of(e: &LobbyEntry, ctx: &LobbyContext, cfg: &Config, playlist: Option<Pl
         ranks: Vec::new(),
         best_tier_name: String::new(),
         total_wins: None,
+        encounter: None,
     };
     match &e.state {
         EntryState::Loading => {}

@@ -286,7 +286,19 @@ pub struct Effects {
     pub status_changed: bool,
     /// Joueur reconnu via la caméra : (PrimaryId, nom)
     pub detected: Option<(String, String)>,
+    /// Match joué jusqu'au bout (pas un abandon) : sert à l'historique des rencontres.
+    pub played: Option<PlayedMatch>,
     pub logs: Vec<String>,
+}
+
+/// Un match terminé avec les joueurs présents (identifiants bruts de la Stats API).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayedMatch {
+    pub my_id: Option<String>,
+    pub my_team: i64,
+    pub won: bool,
+    /// (PrimaryId, pseudo, numéro d'équipe)
+    pub players: Vec<(String, String, i64)>,
 }
 
 // ---------------------------------------------------------------------------
@@ -310,6 +322,8 @@ struct MatchState {
     winner_team: Option<i64>,
     /// Score de chaque équipe (numéro d'équipe, buts) au dernier état reçu.
     scores: Vec<(i64, i64)>,
+    /// Joueurs vus pendant le match : (PrimaryId, pseudo, équipe).
+    players: Vec<(String, String, i64)>,
     overtime: bool,
     /// Le temps réglementaire est écoulé (chrono à zéro, hors prolongation).
     clock_expired: bool,
@@ -328,6 +342,7 @@ impl MatchState {
             deaths: 0,
             winner_team: None,
             scores: Vec::new(),
+            players: Vec::new(),
             overtime: false,
             clock_expired: false,
             started: false,
@@ -532,6 +547,17 @@ impl Tracker {
         m.overtime = bool_of(g, "bOvertime");
         m.clock_expired = !m.overtime && g.get("TimeSeconds").and_then(Value::as_i64) == Some(0);
 
+        for p in players {
+            let (Some(id), Some(team)) = (str_of(p, "PrimaryId").filter(|s| !s.is_empty()), p.get("TeamNum").and_then(Value::as_i64)) else {
+                continue;
+            };
+            let name = str_of(p, "Name").unwrap_or("").to_string();
+            match m.players.iter_mut().find(|(known, _, _)| known == id) {
+                Some(entry) => *entry = (id.to_string(), name, team),
+                None => m.players.push((id.to_string(), name, team)),
+            }
+        }
+
         if m.me.is_none() {
             m.me = identify(players, g, identity, e);
         }
@@ -592,6 +618,14 @@ impl Tracker {
     }
 
     fn record(&mut self, m: &MatchState, won: bool, abandoned: bool, rules: &CountRules, e: &mut Effects) {
+        if let (false, Some(my_team)) = (abandoned, m.my_team) {
+            e.played = Some(PlayedMatch {
+                my_id: m.me.as_ref().and_then(|me| me.id.clone()),
+                my_team,
+                won,
+                players: m.players.clone(),
+            });
+        }
         let name = playlist_name(m.playlist_id);
         if !rules.should_count(m) {
             e.logs.push(format!("Partie non comptée ({name})"));

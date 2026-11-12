@@ -54,6 +54,17 @@ pub struct RankView {
     pub tier_name: String,
 }
 
+/// Matchs déjà joués avec ou contre ce joueur (résultats vus de mon côté).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EncounterView {
+    pub against_wins: u32,
+    pub against_losses: u32,
+    pub with_wins: u32,
+    pub with_losses: u32,
+    /// Heure Unix du dernier match partagé.
+    pub last_seen: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlayerView {
     pub key: String,
@@ -68,6 +79,9 @@ pub struct PlayerView {
     pub ranks: Vec<RankView>,
     pub best_tier_name: String,
     pub total_wins: Option<u32>,
+    /// Historique des matchs déjà joués avec ou contre lui, s'il y en a.
+    #[serde(default)]
+    pub encounter: Option<EncounterView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
